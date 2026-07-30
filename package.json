@@ -1,4 +1,16 @@
 {
   "name": "supabase-heartbeat",
-  "packageManager": "yarn@4.10.3"
+  "private": true,
+  "packageManager": "yarn@4.10.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "yarn workspaces foreach --parallel --interlaced run dev",
+    "build": "yarn workspaces foreach --topological run build",
+    "lint": "yarn workspaces foreach --parallel run lint",
+    "typecheck": "yarn workspaces foreach --parallel run typecheck",
+    "test": "yarn workspaces foreach --parallel run test"
+  }
 }

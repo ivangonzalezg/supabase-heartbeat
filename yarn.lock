@@ -5,6 +5,30 @@ __metadata:
   version: 8
   cacheKey: 10c0
 
+"@supabase-heartbeat/api@workspace:apps/api":
+  version: 0.0.0-use.local
+  resolution: "@supabase-heartbeat/api@workspace:apps/api"
+  languageName: unknown
+  linkType: soft
+
+"@supabase-heartbeat/contracts@workspace:packages/contracts":
+  version: 0.0.0-use.local
+  resolution: "@supabase-heartbeat/contracts@workspace:packages/contracts"
+  languageName: unknown
+  linkType: soft
+
+"@supabase-heartbeat/validation@workspace:packages/validation":
+  version: 0.0.0-use.local
+  resolution: "@supabase-heartbeat/validation@workspace:packages/validation"
+  languageName: unknown
+  linkType: soft
+
+"@supabase-heartbeat/web@workspace:apps/web":
+  version: 0.0.0-use.local
+  resolution: "@supabase-heartbeat/web@workspace:apps/web"
+  languageName: unknown
+  linkType: soft
+
 "supabase-heartbeat@workspace:.":
   version: 0.0.0-use.local
   resolution: "supabase-heartbeat@workspace:."
