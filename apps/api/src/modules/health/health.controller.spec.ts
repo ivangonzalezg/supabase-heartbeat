@@ -16,7 +16,12 @@ describe('HealthController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('should return status ok', () => {
-    expect(controller.getHealth()).toEqual({ status: 'ok' });
+  it('should return status ok with a timestamp and uptime', () => {
+    const result = controller.getHealth();
+
+    expect(result.status).toBe('ok');
+    expect(new Date(result.timestamp).toString()).not.toBe('Invalid Date');
+    expect(typeof result.uptime).toBe('number');
+    expect(result.uptime).toBeGreaterThanOrEqual(0);
   });
 });

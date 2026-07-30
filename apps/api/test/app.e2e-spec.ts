@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import type { HealthStatus } from './../src/modules/health/health.controller';
 
 describe('HealthController (e2e)', () => {
   let app: INestApplication<App>;
@@ -17,11 +18,15 @@ describe('HealthController (e2e)', () => {
     await app.init();
   });
 
-  it('/api/health (GET)', () => {
-    return request(app.getHttpServer())
+  it('/api/health (GET)', async () => {
+    const response = await request(app.getHttpServer())
       .get('/api/health')
-      .expect(200)
-      .expect({ status: 'ok' });
+      .expect(200);
+    const body = response.body as HealthStatus;
+
+    expect(body.status).toBe('ok');
+    expect(typeof body.timestamp).toBe('string');
+    expect(typeof body.uptime).toBe('number');
   });
 
   afterEach(async () => {

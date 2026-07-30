@@ -6,6 +6,7 @@ import { attachViteDevProxy } from './frontend/vite-dev-proxy';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
+  app.enableShutdownHooks();
 
   const config = new DocumentBuilder()
     .setTitle('Supabase Heartbeat API')

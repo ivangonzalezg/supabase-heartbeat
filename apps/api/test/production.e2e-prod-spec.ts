@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import type { HealthStatus } from './../src/modules/health/health.controller';
 
 const webDistPath = join(__dirname, '..', '..', 'web', 'dist');
 
@@ -44,12 +45,16 @@ describe('Production frontend hosting (e2e)', () => {
     delete process.env.NODE_ENV;
   });
 
-  it('GET /api/health returns JSON', () => {
-    return request(app.getHttpServer())
+  it('GET /api/health returns JSON', async () => {
+    const response = await request(app.getHttpServer())
       .get('/api/health')
       .expect(200)
-      .expect('Content-Type', /json/)
-      .expect({ status: 'ok' });
+      .expect('Content-Type', /json/);
+    const body = response.body as HealthStatus;
+
+    expect(body.status).toBe('ok');
+    expect(typeof body.timestamp).toBe('string');
+    expect(typeof body.uptime).toBe('number');
   });
 
   it('GET /api/does-not-exist returns a JSON 404, not HTML', () => {
