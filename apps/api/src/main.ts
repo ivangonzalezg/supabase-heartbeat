@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { attachViteDevProxy } from './frontend/vite-dev-proxy';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -17,6 +18,11 @@ async function bootstrap() {
     jsonDocumentUrl: 'api/openapi.json',
   });
 
+  if (process.env.NODE_ENV !== 'production') {
+    attachViteDevProxy(app);
+  }
+
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+
+void bootstrap();

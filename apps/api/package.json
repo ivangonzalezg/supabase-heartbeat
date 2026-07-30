@@ -13,13 +13,16 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e:prod": "yarn workspace @supabase-heartbeat/web build && jest --config ./test/jest-e2e-prod.json"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/serve-static": "^5.0.5",
     "@nestjs/swagger": "^11.2.0",
+    "http-proxy-middleware": "^4.2.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

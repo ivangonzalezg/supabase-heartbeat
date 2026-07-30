@@ -1,0 +1,82 @@
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { NestFactory } from '@nestjs/core';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { App } from 'supertest/types';
+
+const webDistPath = join(__dirname, '..', '..', 'web', 'dist');
+
+if (!existsSync(webDistPath)) {
+  throw new Error(
+    `Web build not found at ${webDistPath}. Run ` +
+      '"yarn workspace @supabase-heartbeat/api test:e2e:prod", which builds the web app first.',
+  );
+}
+
+describe('Production frontend hosting (e2e)', () => {
+  let app: INestApplication<App>;
+
+  beforeEach(async () => {
+    // NODE_ENV must be 'production' before `AppModule` is loaded, since its
+    // FrontendModule import is decided once, at module-evaluation time. A
+    // deferred require (rather than a static top-of-file import, which the
+    // compiler hoists above this assignment) ensures that ordering.
+    //
+    // The app is also bootstrapped with the real `NestFactory.create()`
+    // (as `main.ts` does), not `Test.createTestingModule()`: the latter
+    // attaches the HTTP adapter only after module instantiation, which
+    // makes `@nestjs/serve-static` resolve its Express loader too late.
+    process.env.NODE_ENV = 'production';
+
+    type AppModuleExports = typeof import('./../src/app.module');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const appModuleExports = require('./../src/app.module') as AppModuleExports;
+    const { AppModule } = appModuleExports;
+
+    app = await NestFactory.create(AppModule, { logger: false });
+    app.setGlobalPrefix('api');
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    delete process.env.NODE_ENV;
+  });
+
+  it('GET /api/health returns JSON', () => {
+    return request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200)
+      .expect('Content-Type', /json/)
+      .expect({ status: 'ok' });
+  });
+
+  it('GET /api/does-not-exist returns a JSON 404, not HTML', () => {
+    return request(app.getHttpServer())
+      .get('/api/does-not-exist')
+      .expect(404)
+      .expect('Content-Type', /json/);
+  });
+
+  it('GET / returns the compiled frontend index.html', () => {
+    return request(app.getHttpServer())
+      .get('/')
+      .expect(200)
+      .expect('Content-Type', /html/);
+  });
+
+  it('GET /projects/example falls back to index.html for SPA routes', () => {
+    return request(app.getHttpServer())
+      .get('/projects/example')
+      .expect(200)
+      .expect('Content-Type', /html/);
+  });
+
+  it('GET /favicon.svg serves the physical static asset', () => {
+    return request(app.getHttpServer())
+      .get('/favicon.svg')
+      .expect(200)
+      .expect('Content-Type', /svg/);
+  });
+});
