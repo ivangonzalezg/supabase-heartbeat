@@ -10,6 +10,7 @@
     "dev": "yarn workspaces foreach --all --parallel --interlaced run dev",
     "build": "yarn workspaces foreach --all --topological run build",
     "lint": "yarn workspaces foreach --all --parallel run lint",
+    "format": "yarn workspaces foreach --all --parallel run format",
     "typecheck": "yarn workspaces foreach --all --parallel run typecheck",
     "test": "yarn workspaces foreach --all --parallel run test"
   }
