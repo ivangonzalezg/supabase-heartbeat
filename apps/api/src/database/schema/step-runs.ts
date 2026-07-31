@@ -1,7 +1,14 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+} from 'drizzle-orm/sqlite-core';
 import { workflowRuns } from './workflow-runs';
 import { workflowSteps } from './workflow-steps';
+import { sqlInList, stepRunStatuses } from './types';
 
 export const stepRuns = sqliteTable(
   'step_runs',
@@ -15,7 +22,7 @@ export const stepRuns = sqliteTable(
       .references(() => workflowSteps.id, { onDelete: 'cascade' }),
     position: integer('position').notNull(),
     // Same status set as workflow_runs.
-    status: text('status').notNull(),
+    status: text('status', { enum: stepRunStatuses }).notNull(),
     inputSnapshot: text('input_snapshot', { mode: 'json' }).$type<
       Record<string, unknown>
     >(),
@@ -30,5 +37,10 @@ export const stepRuns = sqliteTable(
   (table) => [
     index('step_runs_workflow_run_id_idx').on(table.workflowRunId),
     index('step_runs_workflow_step_id_idx').on(table.workflowStepId),
+    check(
+      'step_runs_status_check',
+      sql`${table.status} IN (${sql.raw(sqlInList(stepRunStatuses))})`,
+    ),
+    check('step_runs_position_check', sql`${table.position} >= 0`),
   ],
 );

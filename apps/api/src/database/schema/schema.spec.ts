@@ -4,6 +4,13 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from './index';
+import {
+  stepRunStatuses,
+  workflowOverlapPolicies,
+  workflowRunStatuses,
+  workflowRunTriggerTypes,
+  workflowStepTypes,
+} from './types';
 
 type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -80,7 +87,7 @@ async function createWorkflowStep(
       id: crypto.randomUUID(),
       workflowId,
       stepKey: 'step-1',
-      type: 'http-request',
+      type: 'invoke_function',
       position: 0,
       configuration: { url: 'https://example.com' },
       ...overrides,
@@ -386,5 +393,248 @@ describe('database schema', () => {
     expect(remainingSteps).toHaveLength(0);
     expect(remainingRuns).toHaveLength(0);
     expect(remainingStepRuns).toHaveLength(0);
+  });
+});
+
+describe('closed-set CHECK constraints', () => {
+  let db: TestDb;
+  let connection: Database.Database;
+  let projectId: string;
+  let workflowId: string;
+  let stepId: string;
+  let runId: string;
+
+  beforeEach(async () => {
+    ({ db, connection } = createTestDb());
+    const user = await createUser(db);
+    const project = await createProject(db, user.id);
+    const workflow = await createWorkflow(db, project.id);
+    const step = await createWorkflowStep(db, workflow.id);
+    const run = await createWorkflowRun(db, workflow.id);
+    projectId = project.id;
+    workflowId = workflow.id;
+    stepId = step.id;
+    runId = run.id;
+  });
+
+  afterEach(() => {
+    connection.close();
+  });
+
+  describe('workflows.overlap_policy', () => {
+    it.each(workflowOverlapPolicies)('accepts %s', async (value) => {
+      await expect(
+        createWorkflow(db, projectId, { overlapPolicy: value }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects an invalid overlap policy through Drizzle', async () => {
+      await expect(
+        createWorkflow(db, projectId, {
+          overlapPolicy: 'parallel' as (typeof workflowOverlapPolicies)[number],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects an invalid overlap policy through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO workflows
+              (id, project_id, name, cron_expression, timezone, overlap_policy)
+             VALUES (?, ?, 'Raw Workflow', '0 * * * *', 'UTC', 'parallel')`,
+          )
+          .run(crypto.randomUUID(), projectId),
+      ).toThrow();
+    });
+  });
+
+  describe('workflow_steps.type', () => {
+    it.each(workflowStepTypes)('accepts %s', async (value) => {
+      await expect(
+        createWorkflowStep(db, workflowId, {
+          stepKey: `step-${value}`,
+          type: value,
+          position: workflowStepTypes.indexOf(value) + 1,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects an invalid step type through Drizzle', async () => {
+      await expect(
+        createWorkflowStep(db, workflowId, {
+          type: 'http-request' as (typeof workflowStepTypes)[number],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects an invalid step type through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO workflow_steps
+              (id, workflow_id, step_key, type, position, configuration)
+             VALUES (?, ?, 'raw-step', 'http-request', 99, '{}')`,
+          )
+          .run(crypto.randomUUID(), workflowId),
+      ).toThrow();
+    });
+  });
+
+  describe('workflow_steps.position', () => {
+    it('rejects a negative position through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO workflow_steps
+              (id, workflow_id, step_key, type, position, configuration)
+             VALUES (?, ?, 'raw-step', 'wait', -1, '{}')`,
+          )
+          .run(crypto.randomUUID(), workflowId),
+      ).toThrow();
+    });
+  });
+
+  describe('workflow_runs.trigger_type', () => {
+    it.each(workflowRunTriggerTypes)('accepts %s', async (value) => {
+      await expect(
+        createWorkflowRun(db, workflowId, { triggerType: value }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects an invalid trigger type through Drizzle', async () => {
+      await expect(
+        createWorkflowRun(db, workflowId, {
+          triggerType: 'webhook' as (typeof workflowRunTriggerTypes)[number],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects an invalid trigger type through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO workflow_runs (id, workflow_id, trigger_type, status)
+             VALUES (?, ?, 'webhook', 'pending')`,
+          )
+          .run(crypto.randomUUID(), workflowId),
+      ).toThrow();
+    });
+  });
+
+  describe('workflow_runs.status', () => {
+    it.each(workflowRunStatuses)('accepts %s', async (value) => {
+      await expect(
+        createWorkflowRun(db, workflowId, { status: value }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects an invalid status through Drizzle', async () => {
+      await expect(
+        createWorkflowRun(db, workflowId, {
+          status: 'unknown' as (typeof workflowRunStatuses)[number],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects an invalid status through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO workflow_runs (id, workflow_id, trigger_type, status)
+             VALUES (?, ?, 'manual', 'unknown')`,
+          )
+          .run(crypto.randomUUID(), workflowId),
+      ).toThrow();
+    });
+  });
+
+  describe('step_runs.status', () => {
+    it.each(stepRunStatuses)('accepts %s', async (value) => {
+      await expect(
+        createStepRun(db, runId, stepId, { status: value }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects an invalid status through Drizzle', async () => {
+      await expect(
+        createStepRun(db, runId, stepId, {
+          status: 'unknown' as (typeof stepRunStatuses)[number],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects an invalid status through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO step_runs (id, workflow_run_id, workflow_step_id, position, status)
+             VALUES (?, ?, ?, 0, 'unknown')`,
+          )
+          .run(crypto.randomUUID(), runId, stepId),
+      ).toThrow();
+    });
+  });
+
+  describe('step_runs.position', () => {
+    it('rejects a negative position through raw SQL', () => {
+      expect(() =>
+        connection
+          .prepare(
+            `INSERT INTO step_runs (id, workflow_run_id, workflow_step_id, position, status)
+             VALUES (?, ?, ?, -1, 'pending')`,
+          )
+          .run(crypto.randomUUID(), runId, stepId),
+      ).toThrow();
+    });
+  });
+
+  it('still round-trips JSON configuration with a constrained step type', async () => {
+    const configuration = { functionName: 'sendHeartbeat', timeoutMs: 5000 };
+    const step = await createWorkflowStep(db, workflowId, {
+      stepKey: 'json-check',
+      type: 'invoke_function',
+      position: 100,
+      configuration,
+    });
+
+    const [reloaded] = await db
+      .select()
+      .from(schema.workflowSteps)
+      .where(eq(schema.workflowSteps.id, step.id));
+
+    expect(reloaded.configuration).toEqual(configuration);
+  });
+
+  it('still enforces the unique step_key constraint alongside the type check', async () => {
+    await createWorkflowStep(db, workflowId, {
+      stepKey: 'dup-check',
+      type: 'wait',
+      position: 50,
+    });
+
+    await expect(
+      createWorkflowStep(db, workflowId, {
+        stepKey: 'dup-check',
+        type: 'wait',
+        position: 51,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('still enforces the unique position constraint alongside the position check', async () => {
+    await createWorkflowStep(db, workflowId, {
+      stepKey: 'pos-check-a',
+      type: 'wait',
+      position: 60,
+    });
+
+    await expect(
+      createWorkflowStep(db, workflowId, {
+        stepKey: 'pos-check-b',
+        type: 'wait',
+        position: 60,
+      }),
+    ).rejects.toThrow();
   });
 });

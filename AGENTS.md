@@ -101,6 +101,43 @@ Do not describe or add tables/behavior for features that are not yet
 implemented (for example, do not invent Better Auth behavior beyond what
 actually exists in `apps/api/src/modules/auth/`).
 
+Application-owned columns with a fixed set of valid values (statuses, step
+types, trigger types, policies) must define a canonical readonly tuple in
+`apps/api/src/database/schema/types.ts`, use Drizzle's SQLite `text({
+enum: [...] })` inference for the TypeScript type, and enforce the same set
+at runtime with a named SQLite `CHECK` constraint. TypeScript inference
+alone is not runtime enforcement — both layers are required.
+
+SQLite does not provide PostgreSQL-style row-level security. It cannot
+determine the Better Auth user for a request. Never describe SQLite as
+supporting native RLS, and never emulate it with shared-connection global
+state (mutable current-user variables, AsyncLocalStorage query filtering,
+triggers, or monkey-patched Drizzle default scopes).
+
+Row authorization is enforced at the application level, in domain
+services:
+
+* Controllers pass the authenticated Better Auth actor to services; they
+  must not query Drizzle directly, implement ownership rules, or trust a
+  client-supplied owner/user ID.
+* Services scope every user-facing list, update, and delete query by the
+  authenticated actor's ownership (or explicit access) — never look up a
+  resource unscoped and then mutate it.
+* SQLite-level constraints (foreign keys, cascades, uniqueness, `CHECK`)
+  enforce data integrity; they do not replace authorization.
+
+## Agent task reports
+
+Substantial implementation tasks (schema changes, new modules, migrations,
+multi-file features) must maintain a persistent report under
+`.agent-reports/YYYY-MM-DD-<task-slug>/`, with `report.md`, `commands.md`,
+`inspection.md`, and `validation.md` updated progressively while the work
+happens, not reconstructed from memory afterward. Redact secrets,
+credentials, and tokens as `[REDACTED]`. Never commit `.agent-reports/`
+(it is gitignored). Return only a concise terminal summary plus the report
+path — trivial edits (e.g. a one-line typo fix) do not need a report unless
+explicitly requested.
+
 ## Web rules (`apps/web`)
 
 * Use relative `/api/...` requests. Do not introduce a frontend API base

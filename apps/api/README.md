@@ -44,7 +44,8 @@ src/
 ├── frontend/   # Vite dev proxy + production static-hosting integration
 ├── lib/        # Cross-cutting, domain-independent code
 │   ├── load-env.ts        # Loads apps/api/.env at startup
-│   └── swagger/            # Merged OpenAPI document + Scalar page (see "API documentation")
+│   ├── swagger/            # Merged OpenAPI document + Scalar page (see "API documentation")
+│   └── authorization/      # AuthenticatedActor + ForbiddenResourceError (see "Row authorization")
 └── modules/
     ├── auth/     # Better Auth configuration and NestJS wiring
     └── health/   # GET /api/health
@@ -128,6 +129,85 @@ directory set to `apps/api`, so the effective default is
   * `journal_mode = WAL` — lets reads continue while a write is in
     progress, which suits a long-running server process better than
     SQLite's default rollback journal.
+
+## Closed-set columns
+
+Application-owned columns that only ever accept a fixed set of values
+(`workflows.overlap_policy`, `workflow_steps.type`,
+`workflow_runs.trigger_type`, `workflow_runs.status`, `step_runs.status`)
+have their valid values declared once, as canonical readonly tuples, in
+[`src/database/schema/types.ts`](src/database/schema/types.ts). Each tuple
+is used in two places:
+
+* **TypeScript** — Drizzle's SQLite `text('column', { enum: [...] })`
+  inference narrows `$inferSelect`/`$inferInsert` to the tuple's union
+  type, so an invalid literal fails to compile.
+* **SQLite** — a named `CHECK` constraint (e.g.
+  `workflow_steps_type_check`) enforces the same set at the database
+  level, so an invalid value is rejected even through raw SQL or any other
+  path that bypasses TypeScript.
+
+Both layers are required: TypeScript inference alone is a compile-time
+convenience with no runtime effect once a value reaches the database.
+
+`workflow_steps.type` selects which step executor and configuration schema
+applies; `workflow_steps.configuration` (`text(..., { mode: 'json' })`)
+stores the parameters specific to that step instance. The database only
+guarantees the column holds valid JSON and an allowed step type — it does
+not validate the JSON's shape against the step type. Structural validation
+of `configuration` belongs in the application layer (a shared validation
+package, not yet initialized) and runs before a service passes the value
+to Drizzle.
+
+## Row authorization
+
+SQLite has no PostgreSQL-style row-level security, and Better Auth does
+not provide it either: Better Auth authenticates the HTTP request (who is
+making it) but never injects that identity into SQLite, modifies Drizzle
+queries, or filters rows by owner on its own. Authorization is therefore
+enforced explicitly at the application level:
+
+```text
+HTTP request
+  → Better Auth session validation
+  → authenticated actor (userId + role)
+  → controller passes the actor and input to a service
+  → domain service applies ownership-scoped authorization
+  → ownership-scoped Drizzle query
+  → SQLite
+```
+
+Boundaries:
+
+* **Controllers** receive the Better Auth actor, validate HTTP input, and
+  pass the actor to services. They must not query Drizzle directly,
+  encode ownership rules, trust a client-supplied owner ID, or perform an
+  unscoped list/update/delete.
+* **Services** receive the actor, scope every user-facing query by
+  ownership (or explicit access), and reject resources the actor does not
+  own — never an unscoped lookup followed by an unscoped mutation.
+* **SQLite** enforces foreign keys, cascades, uniqueness, JSON validity,
+  and the closed-set `CHECK` constraints above. None of that is
+  authorization — it is data integrity.
+
+Current ownership hierarchy: `projects.owner_id → users.id`. Every child
+table (`workflows`, `workflow_steps`, `workflow_runs`, `step_runs`) derives
+its owner by joining up to `projects`; `owner_id` is intentionally not
+duplicated onto each child table. An `admin` role may get cross-owner
+access, but only where a specific endpoint and service explicitly opt into
+administrative behavior — an admin request is never treated as globally
+unscoped by default. The `viewer` role has no implicit access to another
+user's projects; there is no project-sharing model yet. A future
+`project_members` table (project/user/access-level) will be needed before
+sharing exists, but it is not part of the schema today.
+
+A minimal reusable foundation lives in
+[`src/lib/authorization/`](src/lib/authorization): `AuthenticatedActor`
+(the actor shape services receive) and `ForbiddenResourceError` (a
+`ForbiddenException` for a service to throw when an actor lacks access).
+It intentionally stays this small — no policy engine, repository layer, or
+membership table — until the first resource module (e.g. projects) needs
+more.
 
 ## Database commands
 

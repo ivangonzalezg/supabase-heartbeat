@@ -47,3 +47,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Persistent agent task reports
+.agent-reports/

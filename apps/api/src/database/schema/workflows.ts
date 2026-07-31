@@ -1,6 +1,13 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+} from 'drizzle-orm/sqlite-core';
 import { projects } from './projects';
+import { sqlInList, workflowOverlapPolicies } from './types';
 
 export const workflows = sqliteTable(
   'workflows',
@@ -15,7 +22,9 @@ export const workflows = sqliteTable(
     timezone: text('timezone').notNull(),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     // Initial supported value: 'skip'. More policies may be added later.
-    overlapPolicy: text('overlap_policy').notNull().default('skip'),
+    overlapPolicy: text('overlap_policy', { enum: workflowOverlapPolicies })
+      .notNull()
+      .default('skip'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -23,5 +32,11 @@ export const workflows = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
   },
-  (table) => [index('workflows_project_id_idx').on(table.projectId)],
+  (table) => [
+    index('workflows_project_id_idx').on(table.projectId),
+    check(
+      'workflows_overlap_policy_check',
+      sql`${table.overlapPolicy} IN (${sql.raw(sqlInList(workflowOverlapPolicies))})`,
+    ),
+  ],
 );
