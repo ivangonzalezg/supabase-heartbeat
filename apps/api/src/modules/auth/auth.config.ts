@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { admin } from 'better-auth/plugins/admin';
+import { openAPI } from 'better-auth/plugins';
 import * as schema from '../../database/schema';
 import type { AppDatabase } from '../../database/database.types';
 import { accessControl, roles } from './auth.permissions';
@@ -52,6 +53,7 @@ export function createAuth(db: AppDatabase) {
         roles,
         defaultRole: DEFAULT_APPLICATION_ROLE,
       }),
+      openAPI(),
     ],
   });
 }

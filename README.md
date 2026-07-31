@@ -173,9 +173,12 @@ workflow and commands.
 Once the API is running, interactive documentation is available at:
 
 ```text
-/api/docs           # Swagger UI
-/api/openapi.json   # OpenAPI document
+/api/docs           # Scalar reference UI — single merged document
+/api/openapi.json   # Merged OpenAPI document (NestJS + Better Auth)
 ```
+
+See [apps/api/README.md](apps/api/README.md#api-documentation) for how the
+Better Auth endpoints are documented alongside the NestJS ones.
 
 ## Documentation links
 
