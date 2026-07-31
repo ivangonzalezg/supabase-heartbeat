@@ -123,13 +123,12 @@ describe('API documentation (e2e)', () => {
       .expect('Content-Type', /javascript/);
   });
 
-  it('loads the Better Auth reference at /api/auth/reference successfully', () => {
-    return request(app.getHttpServer()).get('/api/auth/reference').expect(200);
+  it("disables Better Auth's own reference page, so /api/docs is the single entry point", () => {
+    return request(app.getHttpServer()).get('/api/auth/reference').expect(404);
   });
 
   it('does not require an authenticated session for any documentation route', async () => {
     await request(app.getHttpServer()).get('/api/docs').expect(200);
     await request(app.getHttpServer()).get('/api/openapi.json').expect(200);
-    await request(app.getHttpServer()).get('/api/auth/reference').expect(200);
   });
 });

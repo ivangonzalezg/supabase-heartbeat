@@ -53,7 +53,10 @@ export function createAuth(db: AppDatabase) {
         roles,
         defaultRole: DEFAULT_APPLICATION_ROLE,
       }),
-      openAPI(),
+      // Only the OpenAPI schema endpoint is used (merged into /api/openapi.json
+      // by src/lib/swagger/swagger.config.ts); the plugin's own Scalar
+      // reference page is disabled so /api/docs is the single doc entry point.
+      openAPI({ disableDefaultReference: true }),
     ],
   });
 }
