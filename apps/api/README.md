@@ -15,15 +15,19 @@ Currently implemented:
 * An authentication foundation using Better Auth (email/password sign-in,
   an admin plugin with `admin`/`viewer` roles, mounted under `/api/auth`),
   including its own generated OpenAPI document and reference UI.
+* A Projects API (`/api/projects`) with application-level, ownership-scoped
+  CRUD — see "Projects API" below.
 * A development proxy that forwards non-API requests to the Vite dev
   server, so the browser only ever talks to this API.
 * Production static hosting of the compiled frontend, with an SPA fallback.
 
 **Planned / not yet implemented:**
 
-* Project and workflow domain modules (CRUD, scheduling, execution).
+* Workflow domain modules (CRUD, scheduling, execution).
+* Project sharing / multi-user access to the same project.
 * First-admin onboarding and any restriction on public sign-up.
-* Business logic beyond the health check and authentication foundation.
+* Business logic beyond the health check, authentication foundation, and
+  Projects API.
 
 ## Current stack
 
@@ -33,6 +37,7 @@ Currently implemented:
 * `better-sqlite3`.
 * `@nestjs/swagger` + `@scalar/express-api-reference` + `@scalar/api-reference` (merged `/api/docs` page, see "API documentation").
 * Better Auth + `@thallesp/nestjs-better-auth`.
+* `class-validator` + `class-transformer` (request DTO validation; see "Projects API").
 * `dotenv` (loads `apps/api/.env` at startup).
 * Jest (unit and e2e tests).
 
@@ -45,10 +50,11 @@ src/
 ├── lib/        # Cross-cutting, domain-independent code
 │   ├── load-env.ts        # Loads apps/api/.env at startup
 │   ├── swagger/            # Merged OpenAPI document + Scalar page (see "API documentation")
-│   └── authorization/      # AuthenticatedActor + ForbiddenResourceError (see "Row authorization")
+│   └── authorization/      # AuthenticatedActor, ForbiddenResourceError, actor mapping (see "Row authorization")
 └── modules/
-    ├── auth/     # Better Auth configuration and NestJS wiring
-    └── health/   # GET /api/health
+    ├── auth/       # Better Auth configuration and NestJS wiring
+    ├── health/     # GET /api/health
+    └── projects/   # Projects API — CRUD with ownership authorization (see "Projects API")
 ```
 
 `src/lib/` holds cross-cutting, domain-independent code with no dependency
@@ -203,11 +209,97 @@ sharing exists, but it is not part of the schema today.
 
 A minimal reusable foundation lives in
 [`src/lib/authorization/`](src/lib/authorization): `AuthenticatedActor`
-(the actor shape services receive) and `ForbiddenResourceError` (a
-`ForbiddenException` for a service to throw when an actor lacks access).
-It intentionally stays this small — no policy engine, repository layer, or
-membership table — until the first resource module (e.g. projects) needs
-more.
+(the actor shape services receive), `ForbiddenResourceError` (a
+`ForbiddenException` for a service to throw when an actor lacks access),
+and `toAuthenticatedActor` (maps a Better Auth session, obtained via
+`@Session()`, into an `AuthenticatedActor`). It intentionally stays this
+small — no policy engine, repository layer, or membership table.
+
+The Projects API (below) is the first module built on this foundation.
+
+## Projects API
+
+`/api/projects` — the first ownership-protected domain module
+(`src/modules/projects/`), demonstrating the row-authorization model above
+end to end.
+
+**Authentication:** every endpoint requires an authenticated Better Auth
+session (enforced by the global `AuthGuard` from
+`@thallesp/nestjs-better-auth`; there is no route-level opt-out here).
+`@Session()` supplies the session to the controller, which converts it to
+an `AuthenticatedActor` via `toAuthenticatedActor` and passes only that to
+`ProjectsService` — the controller never queries Drizzle itself.
+
+**Role matrix**, enforced server-side (`@Roles(['admin'])` on mutation
+routes, plus a matching check inside `ProjectsService` as a defense-in-depth
+backstop for any caller that reaches the service directly):
+
+| Operation          | Admin | Viewer |
+| ------------------ | ----: | -----: |
+| List own projects   |   Yes |    Yes |
+| Read own project     |   Yes |    Yes |
+| Create project     |   Yes |     No |
+| Update own project |   Yes |     No |
+| Delete own project |   Yes |     No |
+
+A viewer mutation attempt returns `403 Forbidden`. `admin` does **not**
+bypass ownership on these endpoints — an admin can only act on projects
+they own themselves; cross-owner administration is out of scope for this
+module (see "Row authorization" above).
+
+**Ownership scoping**, enforced in `ProjectsService`, never in the
+controller:
+
+* **List** (`GET /api/projects`) — `WHERE owner_id = actor.userId`, ordered
+  by `created_at` descending (most recently created project first).
+* **Create** (`POST /api/projects`) — `owner_id` is always
+  `actor.userId`. Any client-provided ownership field is rejected outright
+  (see validation below), not silently dropped.
+* **Read** (`GET /api/projects/:projectId`) — `WHERE id = :projectId AND
+  owner_id = actor.userId`.
+* **Update** (`PATCH /api/projects/:projectId`) — a single scoped `UPDATE
+  ... WHERE id = :projectId AND owner_id = actor.userId ... RETURNING`;
+  never an unscoped lookup followed by an unscoped write.
+* **Delete** (`DELETE /api/projects/:projectId`) — a single scoped `DELETE
+  ... WHERE id = :projectId AND owner_id = actor.userId ... RETURNING`,
+  relying on the existing database cascades for the owned hierarchy
+  (workflows, steps, runs).
+
+**Cross-owner and nonexistent resources are indistinguishable**: reading,
+updating, or deleting a project ID that exists but is owned by another
+user returns the same `404 Not Found` (`ProjectNotFoundError`) as a
+nonexistent ID, so the API never discloses whether a given project ID
+belongs to someone else.
+
+**Validation:** request bodies are validated with `class-validator` DTOs
+(`CreateProjectDto`, `UpdateProjectDto`) through a global `ValidationPipe`
+(`whitelist: true, forbidNonWhitelisted: true, transform: true`) — this is
+also what rejects `ownerId`, `id`, `createdAt`, `updatedAt`, or any other
+unexpected body field with `400 Bad Request` rather than silently dropping
+it. An empty `PATCH` body (`{}`) is rejected by `ProjectsService` with
+`400 Bad Request`. `supabaseUrl` must be an `http`/`https` URL; `name` and
+`publishableKey` must be non-empty after trimming.
+
+**Response shape** — a stable, camelCase public representation, mapped by
+hand in `ProjectsService` from the Drizzle row (never the raw row):
+
+```ts
+{
+  id: string;
+  ownerId: string;
+  name: string;
+  description: string | null;
+  supabaseUrl: string;
+  publishableKey: string;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+Returning `publishableKey` is intentional — Supabase's publishable (anon)
+key is public by design, unlike a service-role key (never handled by this
+API).
 
 ## Database commands
 
@@ -278,7 +370,15 @@ GET /api/health                          # { status, timestamp, uptime }
 /api/openapi.json                        # Merged OpenAPI document (NestJS + Better Auth)
 /api/auth/*                              # Better Auth (sign-in, sign-up, session, admin plugin)
 /api/auth/open-api/generate-schema       # Better Auth's own (unmerged) OpenAPI document
+GET    /api/projects                     # List the authenticated actor's own projects
+POST   /api/projects                     # Create a project (admin only)
+GET    /api/projects/:projectId          # Read an owned project
+PATCH  /api/projects/:projectId          # Partially update an owned project (admin only)
+DELETE /api/projects/:projectId          # Delete an owned project (admin only)
 ```
+
+See "Projects API" above for authentication, role, and ownership-scoping
+details.
 
 ## API documentation
 

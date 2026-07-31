@@ -4,11 +4,11 @@ Supabase Heartbeat is an early-stage, self-hosted application for configuring
 and executing scheduled activity against Supabase projects.
 
 **Current status:** the project has a working NestJS API (with SQLite
-persistence, Drizzle migrations, and a Better Auth authentication
-foundation) and a working React frontend served through that API. Project
-and workflow management, scheduling, and workflow execution are not
-implemented yet — see the [API README](apps/api/README.md) for the exact
-current scope.
+persistence, Drizzle migrations, a Better Auth authentication foundation,
+and an ownership-scoped Projects API) and a working React frontend served
+through that API. Workflow management, scheduling, and workflow execution
+are not implemented yet — see the [API README](apps/api/README.md) for the
+exact current scope.
 
 ## Repository structure
 

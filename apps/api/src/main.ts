@@ -1,5 +1,5 @@
 import './lib/load-env';
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { attachViteDevProxy } from './frontend/vite-dev-proxy';
@@ -16,6 +16,13 @@ async function bootstrap() {
   });
   app.setGlobalPrefix('api');
   app.enableShutdownHooks();
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
 
   await setupSwagger(app);
 
