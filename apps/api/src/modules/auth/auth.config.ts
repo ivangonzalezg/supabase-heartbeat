@@ -46,6 +46,12 @@ export function createAuth(db: AppDatabase) {
     }),
     emailAndPassword: {
       enabled: true,
+      // Public account creation is disabled; the first administrator is
+      // bootstrapped from environment configuration (see
+      // FirstAdminBootstrapService), and every subsequent account is
+      // created by an authenticated administrator through the admin
+      // plugin's own user-creation endpoint. Sign-in is unaffected.
+      disableSignUp: true,
     },
     plugins: [
       admin({

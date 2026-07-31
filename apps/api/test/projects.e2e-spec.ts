@@ -3,18 +3,21 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { AuthService } from '@thallesp/nestjs-better-auth';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { DatabaseService } from './../src/database/database.service';
-import { projects, users, workflows } from './../src/database/schema';
+import { projects, workflows } from './../src/database/schema';
 import { setupSwagger } from './../src/lib/swagger/swagger.config';
+import type { Auth } from './../src/modules/auth/auth.config';
+import type { ApplicationRole } from './../src/modules/auth/auth.types';
 
 interface OpenAPIDocument {
   paths: Record<string, Record<string, unknown>>;
 }
 
-interface SignedUpUser {
+interface SignedInUser {
   cookie: string;
   userId: string;
 }
@@ -25,39 +28,37 @@ interface ProjectResponseBody {
   name: string;
 }
 
-async function signUp(
+const TEST_PASSWORD = 'correct-horse-battery-staple';
+
+/**
+ * Creates a user through Better Auth's server-side admin API (public
+ * signup is disabled — see FirstAdminBootstrapService and
+ * emailAndPassword.disableSignUp) and signs in over real HTTP to obtain a
+ * real session cookie, exactly as an admin-created account would
+ * authenticate in production.
+ */
+async function createAndSignIn(
   app: INestApplication<App>,
   email: string,
-): Promise<SignedUpUser> {
+  role: ApplicationRole,
+): Promise<SignedInUser> {
+  const authService = app.get(AuthService<Auth>);
+  const created = await authService.api.createUser({
+    body: { email, password: TEST_PASSWORD, name: 'Test User', role },
+  });
+
   const response = await request(app.getHttpServer())
-    .post('/api/auth/sign-up/email')
-    .send({
-      email,
-      password: 'correct-horse-battery-staple',
-      name: 'Test User',
-    })
+    .post('/api/auth/sign-in/email')
+    .send({ email, password: TEST_PASSWORD })
     .expect(200);
 
   const setCookieHeader = response.headers['set-cookie'] as unknown as
     string[] | undefined;
   if (!setCookieHeader || setCookieHeader.length === 0) {
-    throw new Error('Sign-up response did not include a session cookie.');
+    throw new Error('Sign-in response did not include a session cookie.');
   }
 
-  const userId = (response.body as { user: { id: string } }).user.id;
-
-  return { cookie: setCookieHeader[0], userId };
-}
-
-async function promoteToAdmin(
-  app: INestApplication<App>,
-  userId: string,
-): Promise<void> {
-  const databaseService = app.get(DatabaseService);
-  await databaseService.db
-    .update(users)
-    .set({ role: 'admin' })
-    .where(eq(users.id, userId));
+  return { cookie: setCookieHeader[0], userId: created.user.id };
 }
 
 describe('Projects API (e2e)', () => {
@@ -116,11 +117,11 @@ describe('Projects API (e2e)', () => {
   });
 
   it('lets admin A create a project and see it in their own list', async () => {
-    const adminA = await signUp(
+    const adminA = await createAndSignIn(
       app,
       `admin-a-${crypto.randomUUID()}@example.com`,
+      'admin',
     );
-    await promoteToAdmin(app, adminA.userId);
 
     const createResponse = await request(app.getHttpServer())
       .post('/api/projects')
@@ -143,16 +144,16 @@ describe('Projects API (e2e)', () => {
   });
 
   it('isolates admin B from admin A projects: list, read, update, delete', async () => {
-    const adminA = await signUp(
+    const adminA = await createAndSignIn(
       app,
       `admin-a-${crypto.randomUUID()}@example.com`,
+      'admin',
     );
-    await promoteToAdmin(app, adminA.userId);
-    const adminB = await signUp(
+    const adminB = await createAndSignIn(
       app,
       `admin-b-${crypto.randomUUID()}@example.com`,
+      'admin',
     );
-    await promoteToAdmin(app, adminB.userId);
 
     const createResponse = await request(app.getHttpServer())
       .post('/api/projects')
@@ -194,12 +195,11 @@ describe('Projects API (e2e)', () => {
   });
 
   it('lets a viewer list and read their own project but not mutate it', async () => {
-    const viewer = await signUp(
+    const viewer = await createAndSignIn(
       app,
       `viewer-${crypto.randomUUID()}@example.com`,
+      'viewer',
     );
-    const admin = await signUp(app, `admin-${crypto.randomUUID()}@example.com`);
-    await promoteToAdmin(app, admin.userId);
 
     // Seed a project owned by the viewer directly (viewers cannot create).
     const databaseService = app.get(DatabaseService);
@@ -246,8 +246,11 @@ describe('Projects API (e2e)', () => {
   });
 
   it('deletes a project and its cascaded children', async () => {
-    const admin = await signUp(app, `admin-${crypto.randomUUID()}@example.com`);
-    await promoteToAdmin(app, admin.userId);
+    const admin = await createAndSignIn(
+      app,
+      `admin-${crypto.randomUUID()}@example.com`,
+      'admin',
+    );
 
     const createResponse = await request(app.getHttpServer())
       .post('/api/projects')
@@ -283,8 +286,11 @@ describe('Projects API (e2e)', () => {
   });
 
   it('rejects invalid input at the HTTP boundary with 400', async () => {
-    const admin = await signUp(app, `admin-${crypto.randomUUID()}@example.com`);
-    await promoteToAdmin(app, admin.userId);
+    const admin = await createAndSignIn(
+      app,
+      `admin-${crypto.randomUUID()}@example.com`,
+      'admin',
+    );
 
     await request(app.getHttpServer())
       .post('/api/projects')
@@ -300,8 +306,11 @@ describe('Projects API (e2e)', () => {
   });
 
   it('rejects an empty update body with 400', async () => {
-    const admin = await signUp(app, `admin-${crypto.randomUUID()}@example.com`);
-    await promoteToAdmin(app, admin.userId);
+    const admin = await createAndSignIn(
+      app,
+      `admin-${crypto.randomUUID()}@example.com`,
+      'admin',
+    );
 
     const createResponse = await request(app.getHttpServer())
       .post('/api/projects')

@@ -34,6 +34,12 @@ describe('createAuth', () => {
     expect(auth.options.emailAndPassword?.enabled).toBe(true);
   });
 
+  it('disables public email/password sign-up', () => {
+    const auth = buildAuth();
+
+    expect(auth.options.emailAndPassword?.disableSignUp).toBe(true);
+  });
+
   it('uses /api/auth as its base path', () => {
     const auth = buildAuth();
 
@@ -74,7 +80,29 @@ describe('application roles', () => {
         project: ['create', 'read', 'update', 'delete'],
         workflow: ['create', 'read', 'update', 'delete', 'execute'],
         execution: ['read', 'delete'],
-        user: ['create', 'read', 'update', 'delete'],
+      }),
+    ).toEqual({ success: true });
+  });
+
+  it('grants admin the full admin-plugin user-management action set, including set-role', () => {
+    // These are the admin plugin's own action names (defaultStatements),
+    // not application-defined ones. `set-role` in particular is what
+    // /admin/create-user needs to assign a role when an admin creates a
+    // new account.
+    expect(
+      adminRole.authorize({
+        user: [
+          'create',
+          'list',
+          'set-role',
+          'ban',
+          'impersonate',
+          'delete',
+          'set-password',
+          'set-email',
+          'get',
+          'update',
+        ],
       }),
     ).toEqual({ success: true });
   });
@@ -97,8 +125,7 @@ describe('application roles', () => {
 
   it('does not grant viewer any user-management permissions', () => {
     expect(
-      viewerRole.authorize({ user: ['create', 'read', 'update', 'delete'] })
-        .success,
+      viewerRole.authorize({ user: ['create', 'set-role', 'update'] }).success,
     ).toBe(false);
   });
 });

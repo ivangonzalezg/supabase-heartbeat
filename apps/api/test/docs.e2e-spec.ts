@@ -75,6 +75,29 @@ describe('API documentation (e2e)', () => {
     );
   });
 
+  it('still documents /api/auth/sign-up/email even though public signup is disabled', async () => {
+    // emailAndPassword.disableSignUp only changes the route's runtime
+    // behavior (a 400 at request time); it does not remove the route from
+    // Better Auth's generated OpenAPI schema. This documents that gap
+    // explicitly rather than silently relying on it (see
+    // apps/api/README.md, "First-administrator bootstrap").
+    const response = await request(app.getHttpServer())
+      .get('/api/openapi.json')
+      .expect(200);
+    const document = response.body as OpenAPIDocument;
+
+    expect(document.paths).toHaveProperty('/api/auth/sign-up/email');
+  });
+
+  it('documents the admin-plugin user-creation endpoint used for administrator-created accounts', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/openapi.json')
+      .expect(200);
+    const document = response.body as OpenAPIDocument;
+
+    expect(document.paths).toHaveProperty('/api/auth/admin/create-user');
+  });
+
   it('tags core Better Auth operations as Authentication', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/openapi.json')

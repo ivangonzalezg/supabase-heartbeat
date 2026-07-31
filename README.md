@@ -157,6 +157,11 @@ The web application does not currently require its own environment file —
 it only ever makes relative `/api/...` requests, which the API's dev proxy
 and production static hosting both handle.
 
+Public sign-up is disabled. To create the first administrator, set
+`FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` before starting the API —
+see [apps/api/README.md](apps/api/README.md#first-administrator-bootstrap)
+for details.
+
 ## Database
 
 The API persists data to a local SQLite file using `better-sqlite3` and

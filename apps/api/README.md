@@ -14,7 +14,9 @@ Currently implemented:
 * Explicit, versioned Drizzle migrations.
 * An authentication foundation using Better Auth (email/password sign-in,
   an admin plugin with `admin`/`viewer` roles, mounted under `/api/auth`),
-  including its own generated OpenAPI document and reference UI.
+  including its own generated OpenAPI document and reference UI. Public
+  account creation is disabled — see "First-administrator bootstrap"
+  below.
 * A Projects API (`/api/projects`) with application-level, ownership-scoped
   CRUD — see "Projects API" below.
 * A development proxy that forwards non-API requests to the Vite dev
@@ -25,7 +27,7 @@ Currently implemented:
 
 * Workflow domain modules (CRUD, scheduling, execution).
 * Project sharing / multi-user access to the same project.
-* First-admin onboarding and any restriction on public sign-up.
+* Frontend administration UI for creating additional users.
 * Business logic beyond the health check, authentication foundation, and
   Projects API.
 
@@ -52,7 +54,7 @@ src/
 │   ├── swagger/            # Merged OpenAPI document + Scalar page (see "API documentation")
 │   └── authorization/      # AuthenticatedActor, ForbiddenResourceError, actor mapping (see "Row authorization")
 └── modules/
-    ├── auth/       # Better Auth configuration and NestJS wiring
+    ├── auth/       # Better Auth config, permissions, first-admin bootstrap (see "First-administrator bootstrap")
     ├── health/     # GET /api/health
     └── projects/   # Projects API — CRUD with ownership authorization (see "Projects API")
 ```
@@ -107,6 +109,9 @@ that is already set.
 | `BETTER_AUTH_SECRET` | Yes | none — throws a startup error if unset or shorter than 32 characters | a random string of 32+ characters | Secret used by Better Auth for signing/encryption. Never commit a real value. |
 | `PORT` | No | `3000` | `3000` | Port the HTTP server listens on. |
 | `NODE_ENV` | No | unset (behaves as development) | `production` | When set to `production`, disables the Vite dev proxy and instead serves the compiled frontend from `apps/web/dist`. |
+| `FIRST_ADMIN_EMAIL` | No, but required together with `FIRST_ADMIN_PASSWORD` | none | `admin@example.com` | Bootstraps the first administrator at startup. See "First-administrator bootstrap" below. |
+| `FIRST_ADMIN_PASSWORD` | No, but required together with `FIRST_ADMIN_EMAIL` | none | a strong initial password | Bootstrap secret — see "First-administrator bootstrap" below for secret-management guidance. |
+| `FIRST_ADMIN_NAME` | No | `Admin` | `Admin` | Display name for the bootstrapped administrator. Alone (without the two variables above), it has no effect. |
 
 `DATABASE_PATH` resolution: the API never derives this path from the
 compiled file's own location — it resolves purely against
@@ -216,6 +221,97 @@ and `toAuthenticatedActor` (maps a Better Auth session, obtained via
 small — no policy engine, repository layer, or membership table.
 
 The Projects API (below) is the first module built on this foundation.
+
+## First-administrator bootstrap
+
+Public account creation is disabled
+(`emailAndPassword.disableSignUp: true` in `auth.config.ts`).
+`POST /api/auth/sign-up/email` remains registered and documented in the
+generated OpenAPI schema (Better Auth's `disableSignUp` is a runtime
+guard, not a route removal), but every call to it now fails with
+`400 Bad Request` and `{ "code": "EMAIL_PASSWORD_SIGN_UP_DISABLED" }`.
+**Email/password sign-in (`POST /api/auth/sign-in/email`) is unaffected**
+and remains the normal way to authenticate.
+
+With public signup gone, the only way to get an initial account is the
+optional first-administrator bootstrap
+(`FirstAdminBootstrapService`, `src/modules/auth/`), which runs once at
+startup (`OnApplicationBootstrap`, after every module's `onModuleInit` has
+completed — including the database connection check and Better Auth's own
+initialization) and creates exactly one administrator from
+`FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` / `FIRST_ADMIN_NAME`, using
+Better Auth's server-side admin API (`auth.api.createUser`) — never a
+direct Drizzle insert, never manual password hashing, never the public
+signup endpoint, and never a created session.
+
+**Configuration matrix:**
+
+| `FIRST_ADMIN_EMAIL` | `FIRST_ADMIN_PASSWORD` | Result |
+|---|---|---|
+| absent | absent | Bootstrap skipped cleanly; the API starts normally. `FIRST_ADMIN_NAME` alone does **not** activate bootstrap. |
+| present | absent | **Startup fails** with a configuration error naming the missing variable. |
+| absent | present | **Startup fails** with a configuration error naming the missing variable. |
+| present | present | Bootstrap is validated and attempted (see below). |
+
+When both are present, the email is trimmed and lowercased, and the
+password is validated against Better Auth's configured minimum/maximum
+password length (defaults: 8–128 characters; not overridden in
+`auth.config.ts`) — **but is never trimmed**, since whitespace is a valid
+password character. `FIRST_ADMIN_NAME` is trimmed and defaults to `Admin`
+if unset or blank after trimming.
+
+**Bootstrap algorithm**, once configuration is valid:
+
+1. If an administrator (`role = 'admin'`) already exists anywhere in the
+   database, log a concise skip message and return — this makes restarts
+   idempotent even if `FIRST_ADMIN_EMAIL` changes between runs.
+2. Otherwise, check whether the configured email already belongs to a
+   user:
+   * **No existing user** — create the administrator.
+   * **Existing user with role `admin`** — treat bootstrap as already
+     satisfied and skip (idempotent restart with the exact same
+     configuration).
+   * **Existing user with any other role** — **fail startup** with an
+     actionable error naming the conflicting email. The existing account
+     is never automatically promoted — silently turning an arbitrary
+     pre-existing account into an administrator because deployment
+     configuration happened to reuse its email would be a serious
+     privilege-escalation trap.
+3. After creation, the returned user's email and role are verified to
+   match what was requested; if not, startup fails rather than silently
+   claiming success.
+
+If the database has no Better Auth tables (migrations were never
+applied), bootstrap fails startup with a message pointing at `db:migrate`
+— it never creates or migrates schema itself.
+
+**Idempotency and concurrency:** bootstrap runs once, synchronously,
+per process startup. This is a single-instance, self-hosted SQLite
+deployment; cross-process races (e.g. two API processes starting against
+the same database file simultaneously) are not defended against with a
+lock table — the `users.email` unique constraint is the actual last line
+of defense, and a duplicate-creation error from Better Auth is surfaced
+clearly rather than crashing uninformatively.
+
+**Removing the variables is safe** once the administrator has been
+created: the account persists in SQLite, and the API continues to start
+normally without `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD` set. Leaving
+them configured across restarts is idempotent but keeps a plaintext
+password in your deployment configuration. `FIRST_ADMIN_PASSWORD` is a
+bootstrap secret — supply it through container secrets, your deployment's
+secret store, or another protected configuration mechanism, and remove it
+after the administrator has been created and verified unless your
+secret-management workflow intentionally retains it. Never commit a real
+value to `.env.example` or anywhere else in the repository.
+
+**Creating additional users**: the admin plugin's own user-management
+endpoint (`POST /api/auth/admin/create-user`, i.e. `auth.api.createUser`
+with a real authenticated session) remains the way an authenticated
+administrator creates further accounts — no separate custom endpoint was
+added for this. It is unauthenticated-rejected, viewer-rejected, and
+admin-only, and only accepts the two application roles (`admin`,
+`viewer`) — an unsupported role value is rejected with `400 Bad Request`.
+There is no frontend UI for this yet.
 
 ## Projects API
 
