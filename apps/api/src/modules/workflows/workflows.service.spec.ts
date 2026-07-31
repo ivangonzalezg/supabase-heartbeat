@@ -70,6 +70,9 @@ const validCreateInput = {
   name: 'Nightly heartbeat',
   cronExpression: '0 */6 * * *',
   timezone: 'UTC',
+  steps: [
+    { stepKey: 'wait-1', type: 'wait' as const, configuration: { seconds: 5 } },
+  ],
 };
 
 describe('WorkflowsService', () => {
@@ -161,6 +164,73 @@ describe('WorkflowsService', () => {
 
       expect(workflow.enabled).toBe(true);
       expect(workflow.overlapPolicy).toBe('skip');
+    });
+
+    it('persists a single step at position 0 and returns it in the response', async () => {
+      const workflow = await service.create(
+        adminAActor,
+        projectA.id,
+        validCreateInput,
+      );
+
+      expect(workflow.steps).toHaveLength(1);
+      expect(workflow.steps[0]).toMatchObject({
+        stepKey: 'wait-1',
+        type: 'wait',
+        position: 0,
+        configuration: { seconds: 5 },
+        enabled: true,
+      });
+
+      const persisted = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, workflow.id));
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].position).toBe(0);
+    });
+
+    it('persists multiple steps with server-assigned sequential positions matching array order', async () => {
+      const workflow = await service.create(adminAActor, projectA.id, {
+        ...validCreateInput,
+        steps: [
+          { stepKey: 'first', type: 'signin', configuration: {} },
+          { stepKey: 'second', type: 'wait', configuration: { seconds: 1 } },
+          { stepKey: 'third', type: 'signout', configuration: {} },
+        ],
+      });
+
+      expect(workflow.steps.map((s) => [s.stepKey, s.position])).toEqual([
+        ['first', 0],
+        ['second', 1],
+        ['third', 2],
+      ]);
+    });
+
+    it('rolls back the workflow and all earlier steps when a later step insert fails', async () => {
+      const beforeWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+
+      await expect(
+        service.create(adminAActor, projectA.id, {
+          ...validCreateInput,
+          steps: [
+            { stepKey: 'first', type: 'signin', configuration: {} },
+            { stepKey: 'second', type: 'wait', configuration: { seconds: 1 } },
+            // Duplicate stepKey within the same workflow forces the
+            // database's own unique constraint to reject this insert,
+            // simulating a failure during a later step.
+            { stepKey: 'first', type: 'signout', configuration: {} },
+          ],
+        }),
+      ).rejects.toThrow();
+
+      const afterWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+      expect(afterWorkflowCount).toBe(beforeWorkflowCount);
+
+      const allSteps = await db.select().from(schema.workflowSteps);
+      expect(allSteps).toHaveLength(0);
     });
   });
 
@@ -507,9 +577,9 @@ describe('WorkflowsService', () => {
         .values({
           id: crypto.randomUUID(),
           workflowId: created.id,
-          stepKey: 'step-1',
+          stepKey: 'step-2',
           type: 'wait',
-          position: 0,
+          position: 1,
           configuration: {},
         })
         .returning();

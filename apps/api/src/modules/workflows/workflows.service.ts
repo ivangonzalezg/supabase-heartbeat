@@ -3,10 +3,10 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { and, desc, eq, exists } from 'drizzle-orm';
+import { and, asc, desc, eq, exists } from 'drizzle-orm';
 import { DatabaseService } from '../../database/database.service';
-import { projects, workflows } from '../../database/schema';
-import type { Workflow } from '../../database/schema/types';
+import { projects, workflows, workflowSteps } from '../../database/schema';
+import type { Workflow, WorkflowStep } from '../../database/schema/types';
 import type { AuthenticatedActor } from '../../lib/authorization/authorization.types';
 import { ProjectNotFoundError } from '../projects/projects.errors';
 import type { CreateWorkflowDto } from './dto/create-workflow.dto';
@@ -15,7 +15,11 @@ import {
   type UpdateWorkflowDto,
 } from './dto/update-workflow.dto';
 import { WorkflowNotFoundError } from './workflows.errors';
-import type { WorkflowResponse } from './workflows.types';
+import type {
+  WorkflowDetailResponse,
+  WorkflowResponse,
+} from './workflows.types';
+import type { WorkflowStepResponse } from './steps/workflow-steps.types';
 
 @Injectable()
 export class WorkflowsService {
@@ -44,38 +48,69 @@ export class WorkflowsService {
     return rows.map(toWorkflowResponse);
   }
 
+  /**
+   * Creates the workflow and its complete ordered step list in a single
+   * transaction: if any step insert fails (or the workflow insert fails),
+   * nothing is persisted. `input.steps` has already been fully validated
+   * (metadata, array bounds, duplicate keys, per-step type/configuration
+   * pairing) by the DTO's own decorators before this method runs, so the
+   * transaction body only needs to assign positions and persist.
+   */
   async create(
     actor: AuthenticatedActor,
     projectId: string,
     input: CreateWorkflowDto,
-  ): Promise<WorkflowResponse> {
+  ): Promise<WorkflowDetailResponse> {
     this.assertCanMutate(actor);
     await this.assertOwnedProject(actor, projectId);
 
-    const [row] = await this.db
-      .insert(workflows)
-      .values({
-        id: crypto.randomUUID(),
-        projectId,
-        name: input.name,
-        description: input.description ?? null,
-        cronExpression: input.cronExpression,
-        timezone: input.timezone,
-        ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
-        ...(input.overlapPolicy === undefined
-          ? {}
-          : { overlapPolicy: input.overlapPolicy }),
-      })
-      .returning();
+    return this.db.transaction((tx) => {
+      const [workflowRow] = tx
+        .insert(workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId,
+          name: input.name,
+          description: input.description ?? null,
+          cronExpression: input.cronExpression,
+          timezone: input.timezone,
+          ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+          ...(input.overlapPolicy === undefined
+            ? {}
+            : { overlapPolicy: input.overlapPolicy }),
+        })
+        .returning()
+        .all();
 
-    return toWorkflowResponse(row);
+      const stepRows = input.steps.map(
+        (step, position) =>
+          tx
+            .insert(workflowSteps)
+            .values({
+              id: crypto.randomUUID(),
+              workflowId: workflowRow.id,
+              stepKey: step.stepKey,
+              type: step.type,
+              position,
+              configuration: step.configuration,
+              ...(step.enabled === undefined ? {} : { enabled: step.enabled }),
+            })
+            .returning()
+            .all()[0],
+      );
+
+      return {
+        ...toWorkflowResponse(workflowRow),
+        steps: stepRows.map(toWorkflowStepResponse),
+      };
+    });
   }
 
   async findById(
     actor: AuthenticatedActor,
     projectId: string,
     workflowId: string,
-  ): Promise<WorkflowResponse> {
+  ): Promise<WorkflowDetailResponse> {
     await this.assertOwnedProject(actor, projectId);
 
     const [row] = await this.db
@@ -89,7 +124,16 @@ export class WorkflowsService {
       throw new WorkflowNotFoundError();
     }
 
-    return toWorkflowResponse(row);
+    const stepRows = await this.db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.workflowId, row.id))
+      .orderBy(asc(workflowSteps.position));
+
+    return {
+      ...toWorkflowResponse(row),
+      steps: stepRows.map(toWorkflowStepResponse),
+    };
   }
 
   async update(
@@ -222,6 +266,20 @@ function toWorkflowResponse(row: Workflow): WorkflowResponse {
     timezone: row.timezone,
     enabled: row.enabled,
     overlapPolicy: row.overlapPolicy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function toWorkflowStepResponse(row: WorkflowStep): WorkflowStepResponse {
+  return {
+    id: row.id,
+    workflowId: row.workflowId,
+    stepKey: row.stepKey,
+    type: row.type,
+    position: row.position,
+    configuration: row.configuration,
+    enabled: row.enabled,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

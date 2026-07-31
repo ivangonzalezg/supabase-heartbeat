@@ -1,0 +1,78 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsBoolean,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { workflowStepTypes } from '@supabase-heartbeat/validation';
+
+/**
+ * Allows partial updates to `stepKey`, `type`, `configuration`, and
+ * `enabled`. `position` is intentionally never accepted here — arbitrary
+ * position changes are out of scope for this task; a dedicated
+ * transactional reorder endpoint will be added separately (see
+ * apps/api/README.md).
+ *
+ * Unlike `CreateWorkflowStepDto`, this DTO does **not** validate
+ * `type`/`configuration` together by itself: an update may change only
+ * one of the two (e.g. just `configuration` while `type` stays `wait`),
+ * so the combined pair can only be validated once merged with the
+ * step's current row — `WorkflowStepsService.update` does that merge and
+ * re-validates the result via `parseWorkflowStepConfiguration`.
+ */
+export class UpdateWorkflowStepDto {
+  @ApiPropertyOptional({
+    description:
+      'Stable, machine-friendly identifier for this step within the ' +
+      'workflow (lowercase letters, numbers, hyphens, underscores).',
+    example: 'sign-in',
+  })
+  @IsOptional()
+  @IsString()
+  stepKey?: string;
+
+  @ApiPropertyOptional({
+    description: 'The step executor type.',
+    enum: workflowStepTypes,
+    example: 'signin',
+  })
+  @IsOptional()
+  @IsIn(workflowStepTypes)
+  type?: (typeof workflowStepTypes)[number];
+
+  @ApiPropertyOptional({
+    description:
+      "The step's configuration. If provided together with `type`, or " +
+      "alone while the step's existing `type` stays the same, the " +
+      'resulting merged pair is validated as a whole.',
+    example: {},
+  })
+  @IsOptional()
+  @IsObject()
+  configuration?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description: 'Whether the step is enabled.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
+/**
+ * `class-validator` has no built-in "at least one property present" rule
+ * that fits cleanly on a DTO where every field is individually optional
+ * — same convention as the Projects and Workflows modules' own
+ * `isEmptyUpdate` helpers.
+ */
+export function isEmptyStepUpdate(dto: UpdateWorkflowStepDto): boolean {
+  return (
+    dto.stepKey === undefined &&
+    dto.type === undefined &&
+    dto.configuration === undefined &&
+    dto.enabled === undefined
+  );
+}

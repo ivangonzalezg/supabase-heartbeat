@@ -27,7 +27,10 @@ import { toAuthenticatedActor } from '../../lib/authorization/current-actor';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { WorkflowsService } from './workflows.service';
-import type { WorkflowResponse } from './workflows.types';
+import type {
+  WorkflowDetailResponse,
+  WorkflowResponse,
+} from './workflows.types';
 
 @ApiTags('Workflows')
 @ApiCookieAuth('better-auth.session_token')
@@ -61,13 +64,22 @@ export class WorkflowsController {
   @Roles(['admin'])
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Create a workflow under a project',
+    summary: 'Create a workflow together with its complete ordered step list',
     description:
       'Admin only. The parent project is always the route project ID; ' +
-      'any client-provided ownership field is ignored. A project owned ' +
-      'by another user (or nonexistent) is reported as 404.',
+      'any client-provided ownership field is ignored. The workflow and ' +
+      'every step in `steps` are created together in a single database ' +
+      'transaction: if any step is invalid or any part of the operation ' +
+      'fails, nothing is persisted. At least one step is required; array ' +
+      'order defines the persisted position (steps[0] is position 0, and ' +
+      'so on) — client-supplied positions are never accepted. The ' +
+      'response includes the created workflow and its ordered steps in ' +
+      'one payload. A project owned by another user (or nonexistent) is ' +
+      'reported as 404.',
   })
-  @ApiCreatedResponse({ description: 'The created workflow.' })
+  @ApiCreatedResponse({
+    description: 'The created workflow, including its ordered steps.',
+  })
   @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
   @ApiNotFoundResponse({
     description: 'The project does not exist or is owned by another user.',
@@ -76,7 +88,7 @@ export class WorkflowsController {
     @Session() session: UserSession,
     @Param('projectId') projectId: string,
     @Body() input: CreateWorkflowDto,
-  ): Promise<WorkflowResponse> {
+  ): Promise<WorkflowDetailResponse> {
     return this.workflowsService.create(
       toAuthenticatedActor(session),
       projectId,
@@ -86,14 +98,18 @@ export class WorkflowsController {
 
   @Get(':workflowId')
   @ApiOperation({
-    summary: 'Read a workflow by ID',
+    summary: 'Read a workflow by ID, including its ordered steps',
     description:
-      'Both admin and viewer may read a workflow in their own project. A ' +
-      'workflow that does not exist, belongs to a different project, or ' +
-      'whose project is owned by another user is reported as 404, ' +
-      'identically in every case.',
+      'Both admin and viewer may read a workflow in their own project. ' +
+      'The response includes the complete ordered step list, so a ' +
+      'single-page workflow editor can load everything it needs with ' +
+      'one request. A workflow that does not exist, belongs to a ' +
+      'different project, or whose project is owned by another user is ' +
+      'reported as 404, identically in every case.',
   })
-  @ApiOkResponse({ description: 'The requested workflow.' })
+  @ApiOkResponse({
+    description: 'The requested workflow, including its ordered steps.',
+  })
   @ApiNotFoundResponse({
     description:
       'The project or workflow does not exist, or is not accessible to ' +
@@ -103,7 +119,7 @@ export class WorkflowsController {
     @Session() session: UserSession,
     @Param('projectId') projectId: string,
     @Param('workflowId') workflowId: string,
-  ): Promise<WorkflowResponse> {
+  ): Promise<WorkflowDetailResponse> {
     return this.workflowsService.findById(
       toAuthenticatedActor(session),
       projectId,

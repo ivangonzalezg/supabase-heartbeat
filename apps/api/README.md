@@ -21,20 +21,35 @@ Currently implemented:
   CRUD — see "Projects API" below.
 * A Workflows API (`/api/projects/:projectId/workflows`), nested under
   Projects, with the same ownership model — see "Workflows API" below.
-  Configuration CRUD only; steps, scheduling, and execution are not
-  implemented yet.
+  Workflows are created together with their complete ordered step list in
+  one transactional request; scheduling and execution are not implemented
+  yet.
+* A Workflow Steps API
+  (`/api/projects/:projectId/workflows/:workflowId/steps`), nested under
+  Workflows, for managing steps after creation — see "Workflow Steps API"
+  below.
+* A browser-compatible shared validation package
+  (`packages/validation`, `@supabase-heartbeat/validation`) providing Zod
+  schemas and inferred types for workflow step configuration, reused by
+  this API and intended for a future frontend — see "Shared validation
+  package" below.
 * A development proxy that forwards non-API requests to the Vite dev
   server, so the browser only ever talks to this API.
 * Production static hosting of the compiled frontend, with an SPA fallback.
 
 **Planned / not yet implemented:**
 
-* Workflow steps, step reordering, manual/scheduled execution, workflow
-  runs, step runs.
+* A dedicated bulk step-reorder endpoint (drag-and-drop); arbitrary
+  position changes via `PATCH` are intentionally rejected until then.
+* Manual/scheduled workflow execution, workflow runs, step runs, step
+  executors, output references/interpolation between steps.
+* Project credentials (Supabase URL/keys used to actually run a `signin`
+  step) — step configuration validation exists, but no step can execute
+  yet.
 * Project sharing / multi-user access to the same project.
 * Frontend administration UI for creating additional users.
 * Business logic beyond the health check, authentication foundation,
-  Projects API, and Workflows API.
+  Projects API, Workflows API, and Workflow Steps API.
 
 ## Current stack
 
@@ -66,7 +81,12 @@ src/
     ├── health/      # GET /api/health
     ├── projects/    # Projects API — CRUD with ownership authorization (see "Projects API")
     └── workflows/   # Workflows API — nested under Projects (see "Workflows API")
+        └── steps/   # Workflow Steps API — nested under Workflows (see "Workflow Steps API")
 ```
+
+`packages/validation` (`@supabase-heartbeat/validation`) is a separate,
+browser-compatible workspace outside `apps/api` — see "Shared validation
+package" below.
 
 `src/lib/` holds cross-cutting, domain-independent code with no dependency
 on a specific module. Add to it only when new code genuinely fits that
@@ -410,9 +430,43 @@ API).
 
 `/api/projects/:projectId/workflows` (`src/modules/workflows/`) — nested
 under Projects, inheriting its authorization from the parent project's
-ownership rather than carrying its own `owner_id`. This task covers
-workflow **configuration** CRUD only: steps, scheduling, and execution are
-not implemented.
+ownership rather than carrying its own `owner_id`. Scheduling and
+execution are not implemented.
+
+**Transactional creation with steps**: `POST` requires a nonempty `steps`
+array — a workflow cannot be created without at least one step through
+this endpoint. The workflow row and every step are inserted together in
+a single Drizzle/SQLite transaction (`this.db.transaction(...)` in
+`WorkflowsService.create`): if any step fails to insert, the workflow
+insert (and any earlier step inserts in the same request) is rolled back
+— nothing is left half-persisted. See `WorkflowsService.create` and its
+tests (`workflows.service.spec.ts`, `describe('create')`, in particular
+"rolls back the workflow and all earlier steps when a later step insert
+fails") for the verified behavior, and the persistent report for this
+task for the actual generated SQL.
+
+Step **position is always server-assigned** from array order —
+`steps[0]` becomes position `0`, `steps[1]` position `1`, and so on.
+Client-supplied `position` (or any other unexpected field) on a step is
+rejected with `400` by the DTO's own `whitelist: true` validation, not
+silently ignored. Up to `MAX_STEPS_PER_WORKFLOW` (100) steps are accepted
+per request; duplicate `stepKey` values within the array are rejected
+before the transaction opens.
+
+Every step's `type` and `configuration` are validated together (a
+discriminated pairing), using the shared
+`@supabase-heartbeat/validation` package — see "Shared validation
+package" below for the schema and "Workflow Steps API" below for the
+full field reference. All aggregate input (workflow metadata, array
+bounds, duplicate keys, every step's type/configuration pairing) is
+validated before the transaction begins.
+
+The create/read responses return the workflow together with its full
+ordered `steps` array in one payload (`WorkflowDetailResponse`), so a
+single-page workflow editor can load everything — and the aggregate
+create endpoint can confirm exactly what was persisted — in one request.
+The list endpoint (`GET /api/projects/:projectId/workflows`) intentionally
+stays lightweight and does **not** include step configurations.
 
 **Authentication and role matrix** — identical model to the Projects API:
 every endpoint requires an authenticated session; both `admin` and
@@ -487,7 +541,7 @@ database's own `CHECK` constraint.
 send `null` to clear it, send a string to replace it — same convention as
 create.
 
-**Response shape**:
+**Response shape** (list — lightweight, no step configurations):
 
 ```ts
 {
@@ -504,6 +558,26 @@ create.
 }
 ```
 
+**Response shape** (create and read — includes the full ordered step
+list):
+
+```ts
+{
+  // ...all fields above, plus:
+  steps: {
+    id: string;
+    workflowId: string;
+    stepKey: string;
+    type: WorkflowStepType;
+    position: number;
+    configuration: Record<string, unknown>;
+    enabled: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }[]; // ordered by position ascending
+}
+```
+
 Never exposes the parent project's owner.
 
 **Swagger**: documented under the `Workflows` tag. Uses
@@ -515,6 +589,140 @@ Better Auth's HTTP-only session cookie
 existing `ProjectsController` still uses `@ApiBearerAuth()`, which does
 not reflect actual runtime behavior — left unchanged here as out of
 scope for this task; worth correcting in a follow-up.)
+
+## Workflow Steps API
+
+`/api/projects/:projectId/workflows/:workflowId/steps`
+(`src/modules/workflows/steps/`) — nested under Workflows, for managing a
+workflow's steps after the initial atomic creation described above.
+
+| Operation                            | Admin | Viewer |
+| ------------------------------------- | ----: | -----: |
+| List steps in an owned workflow       |   Yes |    Yes |
+| Read a step in an owned workflow      |   Yes |    Yes |
+| Append a step to an owned workflow    |   Yes |     No |
+| Update a step in an owned workflow    |   Yes |     No |
+| Delete a step in an owned workflow    |   Yes |     No |
+
+**Ownership** is proven through the full hierarchy on every operation:
+`projects.id = :projectId AND projects.owner_id = actor.userId AND
+workflows.id = :workflowId AND workflows.project_id = :projectId`, plus,
+for single-step operations, `workflow_steps.id = :stepId AND
+workflow_steps.workflow_id = :workflowId`. A step is never looked up
+globally by ID and then "trusted" against the route — see
+`WorkflowStepsService.assertOwnedWorkflow` and `findOwnedStep`. A
+mismatched project, workflow, or step ID all return the identical
+`404 Not Found`, disclosing nothing about which part of the hierarchy
+exists.
+
+**Create step** (`POST`, body: `{ stepKey, type, configuration,
+enabled? }`): `position` is never accepted — the new step is always
+appended at `MAX(existing position) + 1` (or `0` for the first step),
+computed and inserted inside a transaction so a concurrent append cannot
+race past the read. The database's own unique
+`(workflow_id, position)` constraint is the final safety net. A
+`stepKey` already used by another step in the same workflow is rejected
+with `409 Conflict`.
+
+**Update step** (`PATCH`, body: any of `stepKey, type, configuration,
+enabled`): `position` is never accepted here either — a dedicated bulk
+reorder endpoint (e.g. `PUT .../steps/order`) is planned for a later
+task; arbitrary position changes via `PATCH` are intentionally rejected
+until then. If `type` or `configuration` changes, the **merged** result
+(the existing step, overridden by the patch) is re-validated as a whole
+pair through the shared validation package — so changing only `type`
+while an old, now-incompatible `configuration` remains from before is
+rejected unless a valid `configuration` for the new `type` is supplied in
+the same request. Renaming `stepKey` to a value already used by another
+step in the same workflow returns `409 Conflict`.
+
+**Delete step** (`DELETE`, `204 No Content` on success): deletes the step
+and **compacts** the remaining steps' positions to stay contiguous in the
+same transaction (e.g. deleting position `1` from `[0,1,2,3]` yields
+`[0,1,2]`, not `[0,2,3]`). Because `(workflow_id, position)` is uniquely
+constrained, compaction uses a collision-safe two-pass rewrite: every
+remaining step is first moved to a large temporary offset, then rewritten
+to its final `0..n-1` position — the unique constraint itself is never
+relaxed. **Deleting the last remaining step of a workflow is rejected
+with `409 Conflict`** — a workflow without any steps cannot be created
+through the aggregate endpoint, and for consistency the same floor
+applies to deletion; delete the workflow itself instead (this cascades to
+all of its steps).
+
+**Not yet implemented**: a dedicated bulk reorder endpoint for
+drag-and-drop use cases. Until it exists, the only way to change step
+order is delete-and-recreate, or working through the aggregate create
+endpoint for a fresh workflow.
+
+**Swagger**: documented under the `Workflow Steps` tag, same
+`@ApiCookieAuth('better-auth.session_token')` convention as the rest of
+the API.
+
+## Shared validation package
+
+`packages/validation` (`@supabase-heartbeat/validation`) is a separate
+Yarn workspace, deliberately kept **browser-compatible**: no NestJS, no
+database, no Node-only imports. It exports Zod v4 schemas and their
+inferred TypeScript types, so both this API and a future frontend can
+validate workflow step input identically without duplicating rules.
+
+Key exports:
+
+* `jsonValueSchema` / `jsonObjectSchema` (and `safeParseJsonValue` /
+  `safeParseJsonObject` wrappers) — a reusable JSON-value type that
+  rejects functions, class instances, `undefined`, symbols, and cyclic
+  structures. The `safeParse*` wrappers exist because Zod's own
+  `safeParse` does not catch the `RangeError` thrown by a cyclic object
+  — verified directly and covered by tests.
+* The canonical closed-set tuples/types shared with the database schema:
+  `workflowStepTypes`, `workflowOverlapPolicies`, `workflowRunTriggerTypes`,
+  `workflowRunStatuses`, `stepRunStatuses` (re-exported, not duplicated,
+  from `apps/api/src/database/schema/types.ts` — moving them here
+  required no migration, confirmed via `db:check`).
+* Per-step-type configuration schemas for all 8 MVP step types:
+  `signin` (`{}`), `signout` (`{}`), `wait` (`{ seconds: integer >= 1,
+  <= 3600 }`), `insert` (`{ table, values: nonempty JSON object }`),
+  `read` (`{ table, columns?, limit? <= 1000 }`), `update` (`{ table,
+  values, filter: { column, operator: 'eq', value } }`), `delete` (`{
+  table, filter }` — `filter` is required, never optional), and
+  `invoke_function` (`{ functionName, body? }`). Every schema rejects
+  unknown properties.
+* `workflowStepConfigurationSchema` / `parseWorkflowStepConfiguration` —
+  validates a `type`/`configuration` pair alone (used when merging an
+  update's patch onto an existing step for re-validation).
+* `workflowStepCreateSchema` / `WorkflowStepCreateInput` — the full
+  create-step input (`stepKey`, `enabled?`, `type`, `configuration`),
+  validated as one discriminated union so an invalid pairing (e.g.
+  `type: 'wait'` with a `read`-shaped `configuration`) is structurally
+  rejected. `stepKey` is trimmed, 1–100 characters, lowercase
+  letters/digits/hyphens/underscores only (whitespace and dots
+  rejected, never silently stripped).
+
+**`signin` cannot execute anything yet**: its configuration schema is
+intentionally empty (`{}`). There is no project credential model in this
+codebase, so a `signin` step has nowhere to source
+email/password/service-role credentials from. Workflow steps never carry
+credentials — adding them here would be premature ahead of a project
+credential model, which is out of scope for this task.
+
+Commands (run from the repository root, or via
+`yarn workspace @supabase-heartbeat/validation <script>`):
+
+```bash
+yarn workspace @supabase-heartbeat/validation lint
+yarn workspace @supabase-heartbeat/validation typecheck
+yarn workspace @supabase-heartbeat/validation test
+yarn workspace @supabase-heartbeat/validation build
+```
+
+`apps/api` depends on it via `workspace:*` and resolves it through its
+built `dist/` output (`main`/`types` in `packages/validation/package.json`),
+not directly from `src/` — the root `build` script builds
+`@supabase-heartbeat/validation` before `apps/api`, so a clean install
+followed by `yarn build` produces a consistent `dist/` before the API is
+compiled. When iterating on both packages locally, rebuild
+`@supabase-heartbeat/validation` (`yarn workspace @supabase-heartbeat/validation build`)
+after changing its source so `apps/api` picks up the change.
 
 ## Database commands
 
@@ -590,15 +798,20 @@ POST   /api/projects                     # Create a project (admin only)
 GET    /api/projects/:projectId          # Read an owned project
 PATCH  /api/projects/:projectId          # Partially update an owned project (admin only)
 DELETE /api/projects/:projectId          # Delete an owned project (admin only)
-GET    /api/projects/:projectId/workflows                # List workflows in an owned project
-POST   /api/projects/:projectId/workflows                # Create a workflow (admin only)
-GET    /api/projects/:projectId/workflows/:workflowId     # Read a workflow in an owned project
-PATCH  /api/projects/:projectId/workflows/:workflowId     # Partially update a workflow (admin only)
-DELETE /api/projects/:projectId/workflows/:workflowId     # Delete a workflow (admin only)
+GET    /api/projects/:projectId/workflows                                 # List workflows in an owned project (lightweight, no steps)
+POST   /api/projects/:projectId/workflows                                 # Create a workflow with its complete ordered steps, transactionally (admin only)
+GET    /api/projects/:projectId/workflows/:workflowId                     # Read a workflow and its ordered steps in an owned project
+PATCH  /api/projects/:projectId/workflows/:workflowId                     # Partially update a workflow (admin only)
+DELETE /api/projects/:projectId/workflows/:workflowId                     # Delete a workflow and its steps (admin only)
+GET    /api/projects/:projectId/workflows/:workflowId/steps               # List a workflow's steps
+POST   /api/projects/:projectId/workflows/:workflowId/steps               # Append a step (admin only)
+GET    /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Read a step
+PATCH  /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Partially update a step, excluding position (admin only)
+DELETE /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Delete a step and compact positions (admin only)
 ```
 
-See "Projects API" and "Workflows API" above for authentication, role, and
-ownership-scoping details.
+See "Projects API", "Workflows API", and "Workflow Steps API" above for
+authentication, role, and ownership-scoping details.
 
 ## API documentation
 

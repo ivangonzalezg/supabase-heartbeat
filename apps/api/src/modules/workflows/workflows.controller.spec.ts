@@ -3,7 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { WorkflowsController } from './workflows.controller';
 import { WorkflowsService } from './workflows.service';
-import type { WorkflowResponse } from './workflows.types';
+import type {
+  WorkflowDetailResponse,
+  WorkflowResponse,
+} from './workflows.types';
 
 function buildSession(role: 'admin' | 'viewer'): UserSession {
   return {
@@ -23,6 +26,11 @@ const sampleWorkflow: WorkflowResponse = {
   overlapPolicy: 'skip',
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+};
+
+const sampleWorkflowDetail: WorkflowDetailResponse = {
+  ...sampleWorkflow,
+  steps: [],
 };
 
 const mockWorkflowsService = {
@@ -62,11 +70,18 @@ describe('WorkflowsController', () => {
   });
 
   it('create() delegates to the service with the actor, project ID, and input', async () => {
-    mockWorkflowsService.create.mockResolvedValue(sampleWorkflow);
+    mockWorkflowsService.create.mockResolvedValue(sampleWorkflowDetail);
     const input = {
       name: 'Sample',
       cronExpression: '0 */6 * * *',
       timezone: 'UTC',
+      steps: [
+        {
+          stepKey: 'wait-1',
+          type: 'wait' as const,
+          configuration: { seconds: 5 },
+        },
+      ],
     };
 
     const result = await controller.create(
@@ -80,11 +95,11 @@ describe('WorkflowsController', () => {
       'project-1',
       input,
     );
-    expect(result).toEqual(sampleWorkflow);
+    expect(result).toEqual(sampleWorkflowDetail);
   });
 
   it('findById() delegates to the service with the actor, project ID, and workflow ID', async () => {
-    mockWorkflowsService.findById.mockResolvedValue(sampleWorkflow);
+    mockWorkflowsService.findById.mockResolvedValue(sampleWorkflowDetail);
 
     const result = await controller.findById(
       buildSession('viewer'),
@@ -97,7 +112,7 @@ describe('WorkflowsController', () => {
       'project-1',
       'workflow-1',
     );
-    expect(result).toEqual(sampleWorkflow);
+    expect(result).toEqual(sampleWorkflowDetail);
   });
 
   it('update() delegates to the service with the actor, project ID, workflow ID, and input', async () => {

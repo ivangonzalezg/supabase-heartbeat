@@ -116,6 +116,7 @@ describe('Workflows API (e2e)', () => {
     name: 'Nightly heartbeat',
     cronExpression: '0 */6 * * *',
     timezone: 'UTC',
+    steps: [{ stepKey: 'wait-1', type: 'wait', configuration: { seconds: 5 } }],
   };
 
   it('rejects unauthenticated requests to every workflow endpoint', async () => {
@@ -393,9 +394,9 @@ describe('Workflows API (e2e)', () => {
       .values({
         id: crypto.randomUUID(),
         workflowId,
-        stepKey: 'step-1',
+        stepKey: 'step-2',
         type: 'wait',
-        position: 0,
+        position: 1,
         configuration: {},
       })
       .returning();
@@ -467,5 +468,367 @@ describe('Workflows API (e2e)', () => {
     expect(
       document.paths['/api/projects/{projectId}/workflows/{workflowId}'].delete,
     ).toBeDefined();
+    expect(document.paths).toHaveProperty(
+      '/api/projects/{projectId}/workflows/{workflowId}/steps',
+    );
+    expect(document.paths).toHaveProperty(
+      '/api/projects/{projectId}/workflows/{workflowId}/steps/{stepId}',
+    );
+    expect(
+      document.paths['/api/projects/{projectId}/workflows/{workflowId}/steps']
+        .get,
+    ).toBeDefined();
+    expect(
+      document.paths['/api/projects/{projectId}/workflows/{workflowId}/steps']
+        .post,
+    ).toBeDefined();
+    expect(
+      document.paths[
+        '/api/projects/{projectId}/workflows/{workflowId}/steps/{stepId}'
+      ].get,
+    ).toBeDefined();
+    expect(
+      document.paths[
+        '/api/projects/{projectId}/workflows/{workflowId}/steps/{stepId}'
+      ].patch,
+    ).toBeDefined();
+    expect(
+      document.paths[
+        '/api/projects/{projectId}/workflows/{workflowId}/steps/{stepId}'
+      ].delete,
+    ).toBeDefined();
+  });
+
+  describe('transactional creation with steps', () => {
+    it('creates a workflow with multiple steps in one request and returns them ordered', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Multi-step workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            { stepKey: 'first', type: 'signin', configuration: {} },
+            { stepKey: 'second', type: 'wait', configuration: { seconds: 1 } },
+            { stepKey: 'third', type: 'signout', configuration: {} },
+          ],
+        })
+        .expect(201);
+
+      const body = response.body as {
+        id: string;
+        steps: { stepKey: string; position: number }[];
+      };
+      expect(body.steps.map((s) => [s.stepKey, s.position])).toEqual([
+        ['first', 0],
+        ['second', 1],
+        ['third', 2],
+      ]);
+
+      const detailResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectId}/workflows/${body.id}`)
+        .set('Cookie', admin.cookie)
+        .expect(200);
+      expect((detailResponse.body as { steps: unknown[] }).steps).toHaveLength(
+        3,
+      );
+    });
+
+    it('rejects an empty steps array with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'No steps',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [],
+        })
+        .expect(400);
+    });
+
+    it('rejects duplicate stepKeys within the steps array with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Dup keys',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            { stepKey: 'same', type: 'signin', configuration: {} },
+            { stepKey: 'same', type: 'signout', configuration: {} },
+          ],
+        })
+        .expect(400);
+    });
+
+    it('rejects a type/configuration mismatch within a step with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Bad config',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            { stepKey: 'bad', type: 'wait', configuration: { table: 'x' } },
+          ],
+        })
+        .expect(400);
+    });
+
+    it('rejects a client-supplied step position with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Client position',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'first',
+              type: 'signin',
+              configuration: {},
+              position: 5,
+            },
+          ],
+        })
+        .expect(400);
+    });
+  });
+
+  describe('workflow steps management', () => {
+    it('lets an admin append, read, update, and delete steps with ownership enforced', async () => {
+      const adminA = await createAndSignIn(
+        app,
+        `admin-a-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const adminB = await createAndSignIn(
+        app,
+        `admin-b-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectAId = await createProjectAs(app, adminA, 'Project A');
+      const projectBId = await createProjectAs(app, adminB, 'Project B');
+
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectAId}/workflows`)
+        .set('Cookie', adminA.cookie)
+        .send(validWorkflowInput)
+        .expect(201);
+      const workflowId = (createResponse.body as WorkflowResponseBody).id;
+
+      // Append a second step.
+      const appendResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
+        .set('Cookie', adminA.cookie)
+        .send({ stepKey: 'second', type: 'signout', configuration: {} })
+        .expect(201);
+      const appended = appendResponse.body as { id: string; position: number };
+      expect(appended.position).toBe(1);
+
+      // List returns both steps ordered.
+      const listResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
+        .set('Cookie', adminA.cookie)
+        .expect(200);
+      expect(listResponse.body as unknown[]).toHaveLength(2);
+
+      // Cross-owner access is 404.
+      await request(app.getHttpServer())
+        .get(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
+        .set('Cookie', adminB.cookie)
+        .expect(404);
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
+        .set('Cookie', adminB.cookie)
+        .send({ stepKey: 'intruder', type: 'signin', configuration: {} })
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(
+          `/api/projects/${projectBId}/workflows/${workflowId}/steps/${appended.id}`,
+        )
+        .set('Cookie', adminB.cookie)
+        .expect(404);
+
+      // Valid update.
+      const updateResponse = await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectAId}/workflows/${workflowId}/steps/${appended.id}`,
+        )
+        .set('Cookie', adminA.cookie)
+        .send({ enabled: false })
+        .expect(200);
+      expect((updateResponse.body as { enabled: boolean }).enabled).toBe(false);
+
+      // position field is rejected outright by the DTO's whitelist.
+      await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectAId}/workflows/${workflowId}/steps/${appended.id}`,
+        )
+        .set('Cookie', adminA.cookie)
+        .send({ position: 9 })
+        .expect(400);
+
+      // Delete compacts remaining positions; deleting the last step is
+      // rejected with 409.
+      await request(app.getHttpServer())
+        .delete(
+          `/api/projects/${projectAId}/workflows/${workflowId}/steps/${appended.id}`,
+        )
+        .set('Cookie', adminA.cookie)
+        .expect(204);
+
+      const remainingResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
+        .set('Cookie', adminA.cookie)
+        .expect(200);
+      const remaining = remainingResponse.body as {
+        id: string;
+        position: number;
+      }[];
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].position).toBe(0);
+
+      // Deleting the last remaining step is rejected.
+      await request(app.getHttpServer())
+        .delete(
+          `/api/projects/${projectAId}/workflows/${workflowId}/steps/${remaining[0].id}`,
+        )
+        .set('Cookie', adminA.cookie)
+        .expect(409);
+    });
+
+    it('lets a viewer read steps but not mutate them', async () => {
+      const viewer = await createAndSignIn(
+        app,
+        `viewer-${crypto.randomUUID()}@example.com`,
+        'viewer',
+      );
+
+      const databaseService = app.get(DatabaseService);
+      const [project] = await databaseService.db
+        .insert(projects)
+        .values({
+          id: crypto.randomUUID(),
+          ownerId: viewer.userId,
+          name: 'Viewer Project',
+          supabaseUrl: 'https://viewer.supabase.co',
+          publishableKey: 'sb_publishable_viewer',
+        })
+        .returning();
+      const [workflow] = await databaseService.db
+        .insert(workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: project.id,
+          name: 'Viewer Workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      const [step] = await databaseService.db
+        .insert(workflowSteps)
+        .values({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          stepKey: 'seeded',
+          type: 'wait',
+          position: 0,
+          configuration: { seconds: 1 },
+        })
+        .returning();
+
+      await request(app.getHttpServer())
+        .get(`/api/projects/${project.id}/workflows/${workflow.id}/steps`)
+        .set('Cookie', viewer.cookie)
+        .expect(200);
+      await request(app.getHttpServer())
+        .get(
+          `/api/projects/${project.id}/workflows/${workflow.id}/steps/${step.id}`,
+        )
+        .set('Cookie', viewer.cookie)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${project.id}/workflows/${workflow.id}/steps`)
+        .set('Cookie', viewer.cookie)
+        .send({ stepKey: 'new', type: 'signin', configuration: {} })
+        .expect(403);
+      await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${project.id}/workflows/${workflow.id}/steps/${step.id}`,
+        )
+        .set('Cookie', viewer.cookie)
+        .send({ enabled: false })
+        .expect(403);
+      await request(app.getHttpServer())
+        .delete(
+          `/api/projects/${project.id}/workflows/${workflow.id}/steps/${step.id}`,
+        )
+        .set('Cookie', viewer.cookie)
+        .expect(403);
+    });
+
+    it('rejects a duplicate stepKey on append with 409', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send(validWorkflowInput)
+        .expect(201);
+      const workflowId = (createResponse.body as WorkflowResponseBody).id;
+      const existingStepKey = validWorkflowInput.steps[0].stepKey;
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflowId}/steps`)
+        .set('Cookie', admin.cookie)
+        .send({ stepKey: existingStepKey, type: 'signin', configuration: {} })
+        .expect(409);
+    });
   });
 });

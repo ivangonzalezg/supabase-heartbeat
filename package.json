@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "yarn workspaces foreach --all --parallel --interlaced --include '@supabase-heartbeat/api' --include '@supabase-heartbeat/web' run dev",
-    "build": "yarn workspace @supabase-heartbeat/web build && yarn workspace @supabase-heartbeat/api build",
+    "build": "yarn workspace @supabase-heartbeat/validation build && yarn workspace @supabase-heartbeat/web build && yarn workspace @supabase-heartbeat/api build",
     "lint": "yarn workspaces foreach --all --parallel run lint",
     "format": "yarn workspaces foreach --all --parallel run format",
     "typecheck": "yarn workspaces foreach --all --parallel run typecheck",

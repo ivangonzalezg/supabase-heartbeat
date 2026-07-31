@@ -1,5 +1,32 @@
 {
   "name": "@supabase-heartbeat/validation",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^4.1.10"
+  }
 }

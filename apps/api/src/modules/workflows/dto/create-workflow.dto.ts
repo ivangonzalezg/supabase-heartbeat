@@ -1,19 +1,26 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   workflowOverlapPolicies,
   type WorkflowOverlapPolicy,
 } from '../../../database/schema/types';
 import { IsCronExpression } from '../validation/cron-expression.validator';
 import { IsIanaTimeZone } from '../validation/time-zone.validator';
+import { CreateWorkflowStepDto } from '../steps/dto/create-workflow-step.dto';
+import { MAX_STEPS_PER_WORKFLOW } from '../steps/validation/workflow-step.validator';
+import { IsWorkflowStepArray } from '../steps/validation/workflow-step-array.validator';
 
 const NAME_MAX_LENGTH = 200;
 
@@ -80,4 +87,24 @@ export class CreateWorkflowDto {
   @IsOptional()
   @IsIn(workflowOverlapPolicies)
   overlapPolicy?: WorkflowOverlapPolicy;
+
+  @ApiProperty({
+    description:
+      "The complete ordered list of the workflow's initial steps. " +
+      'Array order defines persisted position: steps[0] becomes position ' +
+      '0, steps[1] becomes position 1, and so on. At least one step is ' +
+      'required (a workflow without steps is not created through this ' +
+      `endpoint) and at most ${MAX_STEPS_PER_WORKFLOW} steps are allowed. ` +
+      'Duplicate stepKey values are rejected. The workflow and every ' +
+      'step are created together in a single database transaction — if ' +
+      'any step is invalid, nothing is persisted.',
+    type: [CreateWorkflowStepDto],
+  })
+  @IsArray()
+  @ArrayMinSize(1, { message: 'steps must contain at least one step' })
+  @ArrayMaxSize(MAX_STEPS_PER_WORKFLOW)
+  @ValidateNested({ each: true })
+  @Type(() => CreateWorkflowStepDto)
+  @IsWorkflowStepArray()
+  steps!: CreateWorkflowStepDto[];
 }

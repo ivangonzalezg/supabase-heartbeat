@@ -5,9 +5,10 @@ and executing scheduled activity against Supabase projects.
 
 **Current status:** the project has a working NestJS API (with SQLite
 persistence, Drizzle migrations, a Better Auth authentication foundation,
-and ownership-scoped Projects and Workflows APIs) and a working React
-frontend served through that API. Workflow steps, scheduling, and
-workflow execution are not implemented yet — see the
+and ownership-scoped Projects and Workflows APIs). Workflows are created
+together with their complete ordered step list transactionally, and
+steps can be managed afterward through a dedicated, ownership-protected
+API. Scheduling and workflow execution are not implemented yet — see the
 [API README](apps/api/README.md) for the exact current scope.
 
 ## Repository structure
@@ -19,7 +20,7 @@ supabase-heartbeat/
 │   └── web/            # React + Vite frontend
 ├── packages/
 │   ├── contracts/      # Reserved for shared types/contracts — placeholder only
-│   └── validation/     # Reserved for shared validation logic — placeholder only
+│   └── validation/      # Shared, browser-compatible Zod validation (workflow steps) — see apps/api/README.md
 ├── package.json
 ├── yarn.lock
 ├── .yarnrc.yml
@@ -27,8 +28,10 @@ supabase-heartbeat/
 └── README.md
 ```
 
-`packages/contracts` and `packages/validation` currently contain only a
-minimal `package.json` each. No shared code has been added to them yet.
+`packages/contracts` currently contains only a minimal `package.json` —
+no shared code has been added to it yet. `packages/validation` is an
+active workspace; see "Shared validation package" in
+[apps/api/README.md](apps/api/README.md) for what it provides.
 
 ## Requirements
 
