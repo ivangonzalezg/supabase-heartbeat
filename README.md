@@ -5,10 +5,10 @@ and executing scheduled activity against Supabase projects.
 
 **Current status:** the project has a working NestJS API (with SQLite
 persistence, Drizzle migrations, a Better Auth authentication foundation,
-and an ownership-scoped Projects API) and a working React frontend served
-through that API. Workflow management, scheduling, and workflow execution
-are not implemented yet — see the [API README](apps/api/README.md) for the
-exact current scope.
+and ownership-scoped Projects and Workflows APIs) and a working React
+frontend served through that API. Workflow steps, scheduling, and
+workflow execution are not implemented yet — see the
+[API README](apps/api/README.md) for the exact current scope.
 
 ## Repository structure
 

@@ -16,6 +16,7 @@ const BETTER_AUTH_DEFAULT_TAG = 'Default';
 const BETTER_AUTH_ADMIN_TAG = 'Admin';
 const HEALTH_TAG = 'health';
 const HEALTH_TAG_RENAMED = 'Health';
+const SESSION_COOKIE_NAME = 'better-auth.session_token';
 
 interface BetterAuthOpenApiDocument {
   paths?: Record<string, unknown>;
@@ -66,6 +67,15 @@ export async function setupSwagger(app: INestApplication): Promise<void> {
     .setTitle('Supabase Heartbeat API')
     .setDescription('API for managing Supabase Heartbeat.')
     .setVersion('0.1.0')
+    .addCookieAuth(SESSION_COOKIE_NAME, {
+      type: 'apiKey',
+      in: 'cookie',
+      name: SESSION_COOKIE_NAME,
+      description:
+        "Better Auth's session cookie, set after signing in via " +
+        '/api/auth/sign-in/email. The application authenticates every ' +
+        'request through this cookie, not a bearer token.',
+    })
     .build();
   const appDocument = SwaggerModule.createDocument(app, config);
   const authService = app.get(AuthService<Auth>);

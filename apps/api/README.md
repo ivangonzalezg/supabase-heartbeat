@@ -19,17 +19,22 @@ Currently implemented:
   below.
 * A Projects API (`/api/projects`) with application-level, ownership-scoped
   CRUD — see "Projects API" below.
+* A Workflows API (`/api/projects/:projectId/workflows`), nested under
+  Projects, with the same ownership model — see "Workflows API" below.
+  Configuration CRUD only; steps, scheduling, and execution are not
+  implemented yet.
 * A development proxy that forwards non-API requests to the Vite dev
   server, so the browser only ever talks to this API.
 * Production static hosting of the compiled frontend, with an SPA fallback.
 
 **Planned / not yet implemented:**
 
-* Workflow domain modules (CRUD, scheduling, execution).
+* Workflow steps, step reordering, manual/scheduled execution, workflow
+  runs, step runs.
 * Project sharing / multi-user access to the same project.
 * Frontend administration UI for creating additional users.
-* Business logic beyond the health check, authentication foundation, and
-  Projects API.
+* Business logic beyond the health check, authentication foundation,
+  Projects API, and Workflows API.
 
 ## Current stack
 
@@ -40,6 +45,9 @@ Currently implemented:
 * `@nestjs/swagger` + `@scalar/express-api-reference` + `@scalar/api-reference` (merged `/api/docs` page, see "API documentation").
 * Better Auth + `@thallesp/nestjs-better-auth`.
 * `class-validator` + `class-transformer` (request DTO validation; see "Projects API").
+* `cron` (validates workflow cron expressions using the same parser
+  `@nestjs/schedule` will use once scheduling is implemented — see
+  "Workflows API").
 * `dotenv` (loads `apps/api/.env` at startup).
 * Jest (unit and e2e tests).
 
@@ -54,9 +62,10 @@ src/
 │   ├── swagger/            # Merged OpenAPI document + Scalar page (see "API documentation")
 │   └── authorization/      # AuthenticatedActor, ForbiddenResourceError, actor mapping (see "Row authorization")
 └── modules/
-    ├── auth/       # Better Auth config, permissions, first-admin bootstrap (see "First-administrator bootstrap")
-    ├── health/     # GET /api/health
-    └── projects/   # Projects API — CRUD with ownership authorization (see "Projects API")
+    ├── auth/        # Better Auth config, permissions, first-admin bootstrap (see "First-administrator bootstrap")
+    ├── health/      # GET /api/health
+    ├── projects/    # Projects API — CRUD with ownership authorization (see "Projects API")
+    └── workflows/   # Workflows API — nested under Projects (see "Workflows API")
 ```
 
 `src/lib/` holds cross-cutting, domain-independent code with no dependency
@@ -397,6 +406,116 @@ Returning `publishableKey` is intentional — Supabase's publishable (anon)
 key is public by design, unlike a service-role key (never handled by this
 API).
 
+## Workflows API
+
+`/api/projects/:projectId/workflows` (`src/modules/workflows/`) — nested
+under Projects, inheriting its authorization from the parent project's
+ownership rather than carrying its own `owner_id`. This task covers
+workflow **configuration** CRUD only: steps, scheduling, and execution are
+not implemented.
+
+**Authentication and role matrix** — identical model to the Projects API:
+every endpoint requires an authenticated session; both `admin` and
+`viewer` may list/read; only `admin` may create/update/delete
+(`@Roles(['admin'])` on mutation routes, plus a matching
+`WorkflowsService` defense-in-depth check). `admin` does not bypass
+project ownership.
+
+| Operation                           | Admin | Viewer |
+| ------------------------------------ | ----: | -----: |
+| List workflows in an owned project   |   Yes |    Yes |
+| Read workflow in an owned project    |   Yes |    Yes |
+| Create workflow in an owned project  |   Yes |     No |
+| Update workflow in an owned project  |   Yes |     No |
+| Delete workflow in an owned project  |   Yes |     No |
+
+**Authorization derives entirely from the parent project**:
+`workflow → project → owner_id → actor`. Every operation proves
+`projects.id = :projectId AND projects.owner_id = actor.userId`; every
+operation on an existing workflow additionally proves
+`workflows.id = :workflowId AND workflows.project_id = :projectId`. List
+and create verify project ownership with a standalone query
+(`WorkflowsService.assertOwnedProject`) since there is no workflow row yet
+to correlate against; read scopes by `id` and `project_id` after that same
+check; update and delete prove both facts in a **single** statement via a
+correlated `EXISTS` subquery against `projects` (verified against the
+actual generated SQL — see the persistent report for this task), never an
+unscoped lookup followed by an unscoped mutation.
+
+**A single `404 Not Found`** covers every one of: nonexistent project,
+project owned by another user, nonexistent workflow, workflow belonging
+to a different project, and workflow whose project is owned by another
+user — the route parameters and the actor's ownership are never enough
+information, on their own, to tell which case applies. A viewer mutation
+attempt is the one behavior that returns `403 Forbidden` instead, since
+that failure is about role, not about which resource exists.
+
+**List ordering**: `created_at` descending (most recently created
+workflow first), matching the Projects API's own convention.
+
+**Cron expression validation** (`IsCronExpression`,
+`src/modules/workflows/validation/cron-expression.validator.ts`): uses the
+`cron` package (npm name `cron`, the `kelektiv/node-cron` project) — the
+exact library `@nestjs/schedule` depends on, installed at the same
+version (`4.4.0`) so that whenever a scheduler is added later, it parses
+every currently-accepted expression identically. Both the 5-field
+(`minute hour day-of-month month day-of-week`) and 6-field (leading
+`second`) forms are accepted, along with the macros this library itself
+supports (`@daily`, `@hourly`, ...). The expression is trimmed before
+validation and storage; no normalization is applied beyond that.
+
+**IANA time-zone validation** (`IsIanaTimeZone`,
+`src/modules/workflows/validation/time-zone.validator.ts`): a value is
+accepted if it is exactly `"UTC"` or appears in
+`Intl.supportedValuesOf('timeZone')` (Node-native, no time-zone database
+dependency). This combination was chosen and verified deliberately:
+`Intl.supportedValuesOf('timeZone')` alone does not include `"UTC"` even
+though it is a universally recognized canonical identifier, while
+`Intl.DateTimeFormat`'s own constructor validation is *more* permissive
+than intended — it also accepts legacy fixed-offset names like `"EST"` and
+`"GMT"`, which must be rejected. Accepted: `UTC`, `America/Bogota`,
+`America/New_York`, `Europe/Madrid`, `Asia/Tokyo`. Rejected: `Bogota`,
+`EST`, `UTC-5`, `Invalid/Zone`, `GMT`. The value is trimmed and stored
+exactly as given — no normalization.
+
+**Overlap policy**: reuses the canonical `WorkflowOverlapPolicy` union and
+`workflowOverlapPolicies` tuple from `src/database/schema/types.ts` — no
+duplicate literal. Only `'skip'` is currently implemented, matching the
+database's own `CHECK` constraint.
+
+**`description` update semantics**: omit the field to leave it unchanged,
+send `null` to clear it, send a string to replace it — same convention as
+create.
+
+**Response shape**:
+
+```ts
+{
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  cronExpression: string;
+  timezone: string;
+  enabled: boolean;
+  overlapPolicy: WorkflowOverlapPolicy;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+Never exposes the parent project's owner.
+
+**Swagger**: documented under the `Workflows` tag. Uses
+`@ApiCookieAuth('better-auth.session_token')` rather than
+`@ApiBearerAuth()` — the application authenticates exclusively through
+Better Auth's HTTP-only session cookie
+(`better-auth.session_token`, added as a global cookie security scheme in
+`src/lib/swagger/swagger.config.ts`), never a bearer token. (Note: the
+existing `ProjectsController` still uses `@ApiBearerAuth()`, which does
+not reflect actual runtime behavior — left unchanged here as out of
+scope for this task; worth correcting in a follow-up.)
+
 ## Database commands
 
 ```bash
@@ -471,10 +590,15 @@ POST   /api/projects                     # Create a project (admin only)
 GET    /api/projects/:projectId          # Read an owned project
 PATCH  /api/projects/:projectId          # Partially update an owned project (admin only)
 DELETE /api/projects/:projectId          # Delete an owned project (admin only)
+GET    /api/projects/:projectId/workflows                # List workflows in an owned project
+POST   /api/projects/:projectId/workflows                # Create a workflow (admin only)
+GET    /api/projects/:projectId/workflows/:workflowId     # Read a workflow in an owned project
+PATCH  /api/projects/:projectId/workflows/:workflowId     # Partially update a workflow (admin only)
+DELETE /api/projects/:projectId/workflows/:workflowId     # Delete a workflow (admin only)
 ```
 
-See "Projects API" above for authentication, role, and ownership-scoping
-details.
+See "Projects API" and "Workflows API" above for authentication, role, and
+ownership-scoping details.
 
 ## API documentation
 

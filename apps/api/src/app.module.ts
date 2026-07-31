@@ -3,6 +3,7 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { FrontendModule } from './frontend/frontend.module';
 
 @Module({
@@ -11,6 +12,7 @@ import { FrontendModule } from './frontend/frontend.module';
     AuthModule,
     HealthModule,
     ProjectsModule,
+    WorkflowsModule,
     ...(process.env.NODE_ENV === 'production' ? [FrontendModule] : []),
   ],
 })
