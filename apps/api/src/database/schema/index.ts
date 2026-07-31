@@ -1,3 +1,8 @@
-// Business tables are added here as domain modules are introduced.
-// Intentionally empty for now: no product tables exist yet.
-export {};
+export * from './auth';
+export * from './projects';
+export * from './workflows';
+export * from './workflow-steps';
+export * from './workflow-runs';
+export * from './step-runs';
+export * from './relations';
+export * from './types';

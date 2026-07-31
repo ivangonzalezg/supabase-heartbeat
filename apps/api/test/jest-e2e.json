@@ -4,7 +4,17 @@
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "setupFiles": ["<rootDir>/jest-e2e.setup.ts"],
+  "extensionsToTreatAsEsm": [".ts"],
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1"
+  },
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
-  }
+    "^.+\\.tsx?$": [
+      "ts-jest",
+      { "useESM": true, "tsconfig": "<rootDir>/../tsconfig.jest-esm.json" }
+    ]
+  },
+  "transformIgnorePatterns": [
+    "/node_modules/(?!(?:better-auth|@better-auth|@thallesp/nestjs-better-auth)/)"
+  ]
 }

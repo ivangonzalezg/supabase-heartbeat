@@ -1,12 +1,11 @@
-import { join } from 'path';
+import { resolve } from 'path';
 
 /**
- * Resolves the compiled web app's `dist` folder relative to this compiled
- * module's own location, so it works regardless of the process's cwd.
- *
- * At runtime this file lives at `apps/api/dist/frontend/frontend-build-path.js`,
- * so the web build sits two directories up, under `apps/web/dist`.
+ * Anchored to the process cwd (`apps/api`, where every entry point launches
+ * from), not `__dirname`: see database.constants.ts for why. Must resolve to
+ * an absolute path, since `res.sendFile` (used by `@nestjs/serve-static`'s
+ * SPA fallback) rejects relative ones.
  */
 export function getFrontendBuildPath(): string {
-  return join(__dirname, '..', '..', '..', 'web', 'dist');
+  return resolve('..', 'web', 'dist');
 }

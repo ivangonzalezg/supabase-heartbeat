@@ -4,9 +4,14 @@ import { NestFactory } from '@nestjs/core';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import type { AppModule as AppModuleType } from './../src/app.module';
 import type { HealthStatus } from './../src/modules/health/health.controller';
 
-const webDistPath = join(__dirname, '..', '..', 'web', 'dist');
+// Resolved from the process cwd (apps/api, where this suite always runs
+// from via the workspace script), not __dirname/import.meta: this file
+// runs under ts-jest's ESM transform, and neither symbol is usable in a
+// way that also works under the plain CJS Jest config other suites use.
+const webDistPath = join('..', 'web', 'dist');
 
 if (!existsSync(webDistPath)) {
   throw new Error(
@@ -21,8 +26,9 @@ describe('Production frontend hosting (e2e)', () => {
   beforeEach(async () => {
     // NODE_ENV must be 'production' before `AppModule` is loaded, since its
     // FrontendModule import is decided once, at module-evaluation time. A
-    // deferred require (rather than a static top-of-file import, which the
-    // compiler hoists above this assignment) ensures that ordering.
+    // dynamic import (rather than a static top-of-file import, which is
+    // still hoisted above this assignment even under ESM) ensures that
+    // ordering.
     //
     // The app is also bootstrapped with the real `NestFactory.create()`
     // (as `main.ts` does), not `Test.createTestingModule()`: the latter
@@ -30,9 +36,9 @@ describe('Production frontend hosting (e2e)', () => {
     // makes `@nestjs/serve-static` resolve its Express loader too late.
     process.env.NODE_ENV = 'production';
 
-    type AppModuleExports = typeof import('./../src/app.module');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const appModuleExports = require('./../src/app.module') as AppModuleExports;
+    const appModuleExports = (await import('./../src/app.module.js')) as {
+      AppModule: typeof AppModuleType;
+    };
     const { AppModule } = appModuleExports;
 
     app = await NestFactory.create(AppModule, { logger: false });

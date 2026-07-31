@@ -1,77 +1,133 @@
-# React + TypeScript + Vite
+# @supabase-heartbeat/web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React frontend for Supabase Heartbeat.
 
-Currently, two official plugins are available:
+## Responsibilities
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Currently, the interface only renders a minimal page with a status card that
+checks whether the API is reachable (`GET /api/health`) and displays
+`Loading`, `API online`, or `API unavailable`. There is no dashboard,
+authentication UI, routing, project/workflow management, or scheduler UI
+yet — those are planned, not implemented.
 
-## React Compiler
+## Stack
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+* React 19.
+* Vite 8 (with the React Compiler enabled).
+* TypeScript.
+* Vitest.
+* React Testing Library (`@testing-library/react`, `@testing-library/dom`,
+  `@testing-library/user-event`, `@testing-library/jest-dom`).
 
-Note: This will impact Vite dev & build performances.
+## Development
 
-## Expanding the ESLint configuration
+Recommended: from the repository root, start both applications together:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+yarn dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Normal browser entry point:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```text
+http://localhost:3000
 ```
+
+To iterate on the frontend in isolation instead:
+
+```bash
+yarn workspace @supabase-heartbeat/web dev
+```
+
+This starts only the Vite dev server directly (bound to `127.0.0.1:5173`).
+It is useful for isolated frontend work, but the app's API requests
+(`/api/...`) will not resolve unless the API is also running and proxying
+requests — for the normal, fully working setup, use the integrated
+`yarn dev` command above.
+
+## API requests
+
+Always use relative `/api/...` URLs:
+
+```ts
+fetch('/api/health');
+```
+
+* Do not introduce a frontend API base URL environment variable.
+* Do not hardcode `localhost:3000` or any other host.
+* Do not introduce a CORS-based development setup without an explicit
+  decision to do so — the current architecture avoids CORS entirely by
+  having NestJS proxy to Vite in development and serve the built frontend
+  directly in production.
+
+## Testing
+
+```bash
+yarn workspace @supabase-heartbeat/web test
+yarn workspace @supabase-heartbeat/web test:watch
+```
+
+Component tests use Vitest with the `jsdom` environment and React Testing
+Library. Conventions already in use in this codebase:
+
+* Test visible behavior (rendered text, roles), not implementation details.
+* Prefer semantic queries (`getByRole`, `getByText`) over test IDs.
+* Colocate tests with the component they cover (for example,
+  `StatusCard.tsx` and `StatusCard.test.tsx` live in the same directory).
+* Avoid snapshot tests as the only assertion.
+
+## Lint, type-check, and build
+
+```bash
+yarn workspace @supabase-heartbeat/web lint
+yarn workspace @supabase-heartbeat/web typecheck
+yarn workspace @supabase-heartbeat/web build
+```
+
+`build` outputs the compiled frontend to:
+
+```text
+apps/web/dist
+```
+
+## Current structure
+
+```text
+src/
+├── main.tsx
+├── App.tsx
+├── App.test.tsx
+├── index.css
+├── components/
+│   └── StatusCard/
+│       ├── StatusCard.tsx
+│       ├── StatusCard.css
+│       └── StatusCard.test.tsx
+└── test/
+    └── setup.ts        # Vitest + jest-dom setup
+```
+
+This is a flat structure with a single shared component so far. No
+feature-based or layered architecture (such as Feature-Sliced Design) has
+been adopted yet.
+
+### Planned architecture
+
+Not implemented yet — noted here only so future structure decisions aren't
+made blind:
+
+* A dashboard for managing Supabase projects and workflows.
+* Authentication UI wired to the API's Better Auth endpoints.
+* Client-side routing.
+
+## Conventions
+
+* Use relative `/api/...` requests; no frontend API base URL.
+* Keep markup accessible and semantic (headings, roles) rather than relying
+  on ad hoc `div`s and test IDs.
+* Colocate component tests with their components.
+* Do not import API database models/schema into frontend code.
+* Do not add a router, state-management library, UI component library, or
+  data-fetching library without an explicit task to do so.
+* Update this README whenever frontend commands, architecture, environment
+  behavior, or testing conventions change.

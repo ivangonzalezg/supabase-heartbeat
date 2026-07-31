@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 
 export interface HealthStatus {
   status: 'ok';
@@ -9,6 +10,7 @@ export interface HealthStatus {
 
 @ApiTags('health')
 @Controller('health')
+@AllowAnonymous()
 export class HealthController {
   @Get()
   @ApiOkResponse({

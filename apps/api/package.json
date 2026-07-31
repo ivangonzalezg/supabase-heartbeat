@@ -10,11 +10,12 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:e2e:prod": "yarn workspace @supabase-heartbeat/web build && jest --config ./test/jest-e2e-prod.json",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:cov": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+    "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e.json",
+    "test:e2e:prod": "yarn workspace @supabase-heartbeat/web build && NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e-prod.json",
+    "auth:generate": "BETTER_AUTH_URL=http://localhost:3000 BETTER_AUTH_SECRET=cli-only-not-a-real-secret-32-characters yarn dlx @better-auth/cli@latest generate --config ./src/modules/auth/auth.cli-config.ts --output ./src/database/schema/auth.ts -y",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:check": "drizzle-kit check",
@@ -26,7 +27,10 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/serve-static": "^5.0.5",
     "@nestjs/swagger": "^11.2.0",
+    "@thallesp/nestjs-better-auth": "2.7.0",
+    "better-auth": "1.6.25",
     "better-sqlite3": "13.0.2",
+    "dotenv": "17.4.2",
     "drizzle-orm": "0.45.2",
     "http-proxy-middleware": "^4.2.0",
     "reflect-metadata": "^0.2.2",
@@ -67,9 +71,24 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
     },
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "useESM": true,
+          "tsconfig": "<rootDir>/../tsconfig.jest-esm.json"
+        }
+      ]
+    },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(?:better-auth|@better-auth|@thallesp/nestjs-better-auth)/)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
