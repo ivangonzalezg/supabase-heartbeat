@@ -8,8 +8,10 @@ import {
   Param,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
@@ -26,6 +28,7 @@ import { Roles, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { toAuthenticatedActor } from '../../../lib/authorization/current-actor';
 import { CreateWorkflowStepDto } from './dto/create-workflow-step.dto';
+import { ReorderWorkflowStepsDto } from './dto/reorder-workflow-steps.dto';
 import { UpdateWorkflowStepDto } from './dto/update-workflow-step.dto';
 import { WorkflowStepsService } from './workflow-steps.service';
 import type { WorkflowStepResponse } from './workflow-steps.types';
@@ -103,6 +106,63 @@ export class WorkflowStepsController {
     );
   }
 
+  @Put('order')
+  @Roles(['admin'])
+  @ApiOperation({
+    summary: "Replace a workflow's complete step order",
+    description:
+      'Admin only. Replaces the persisted order of every step in the ' +
+      'workflow in one request, for use by the frontend drag-and-drop ' +
+      'workflow editor. `PUT` is used, not `PATCH`, because the request ' +
+      'body replaces the complete ordering representation rather than ' +
+      'describing a partial change. The `stepIds` array must contain ' +
+      "every one of the workflow's current step IDs exactly once — " +
+      'array order defines the final position (stepIds[0] becomes ' +
+      'position 0, and so on). A missing current ID, an extra unknown ' +
+      'ID, an ID belonging to another workflow, or a duplicate is ' +
+      'rejected (duplicates and malformed input as 400, a mismatched ID ' +
+      'set as 409) rather than silently corrected. The entire operation ' +
+      'runs inside a single database transaction. Submitting the ' +
+      'current order is valid and is a no-op. A project or workflow ' +
+      'that does not exist, or is not accessible to the current actor, ' +
+      'is reported as 404.',
+  })
+  @ApiOkResponse({
+    description: 'The complete step list in its new order.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'The request body is malformed: `stepIds` is missing, not an ' +
+      'array, empty, contains non-string or empty entries, contains a ' +
+      'duplicate ID, exceeds the maximum step count, or the body ' +
+      'contains an unexpected property.',
+  })
+  @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
+  @ApiNotFoundResponse({
+    description:
+      'The project or workflow does not exist, or is not accessible to ' +
+      'the current actor.',
+  })
+  @ApiConflictResponse({
+    description:
+      "The submitted stepIds do not exactly match the workflow's " +
+      'current step set (a current step ID is missing, an unknown or ' +
+      'foreign ID is included, or the count does not match).',
+  })
+  async reorder(
+    @Session() session: UserSession,
+    @Param('projectId') projectId: string,
+    @Param('workflowId') workflowId: string,
+    @Body() input: ReorderWorkflowStepsDto,
+  ): Promise<WorkflowStepResponse[]> {
+    return this.workflowStepsService.reorder(
+      toAuthenticatedActor(session),
+      projectId,
+      workflowId,
+      input,
+    );
+  }
+
   @Get(':stepId')
   @ApiOperation({
     summary: 'Read a step by ID',
@@ -138,8 +198,8 @@ export class WorkflowStepsController {
     summary: 'Partially update a step',
     description:
       'Admin only. Accepts `stepKey`, `type`, `configuration`, and ' +
-      '`enabled` — `position` is never accepted here; a dedicated ' +
-      'reorder endpoint is not yet implemented. If `type` or ' +
+      '`enabled` — `position` is never accepted here; use ' +
+      '`PUT .../steps/order` to change step order. If `type` or ' +
       '`configuration` changes, the merged result (existing step ' +
       'overridden by the patch) is re-validated as a whole pair, so ' +
       'e.g. changing only `type` while an incompatible `configuration` ' +

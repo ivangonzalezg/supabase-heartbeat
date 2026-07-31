@@ -1,5 +1,9 @@
 import { join } from 'path';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -14,6 +18,7 @@ import {
   DuplicateStepKeyError,
   LastStepDeletionError,
   WorkflowStepNotFoundError,
+  WorkflowStepOrderConflictError,
 } from './workflow-steps.errors';
 
 function createTestDb(): { db: AppDatabase; connection: Database.Database } {
@@ -119,6 +124,7 @@ describe('WorkflowStepsService', () => {
   let adminB: Awaited<ReturnType<typeof createUser>>;
   let viewerA: Awaited<ReturnType<typeof createUser>>;
   let adminAActor: AuthenticatedActor;
+  let adminBActor: AuthenticatedActor;
   let viewerAActor: AuthenticatedActor;
 
   let projectA: Awaited<ReturnType<typeof createProject>>;
@@ -137,6 +143,7 @@ describe('WorkflowStepsService', () => {
     adminB = await createUser(db, 'admin');
     viewerA = await createUser(db, 'viewer');
     adminAActor = actorFor(adminA);
+    adminBActor = actorFor(adminB);
     viewerAActor = actorFor(viewerA);
 
     projectA = await createProject(db, adminA.id, { name: 'Project A' });
@@ -504,6 +511,286 @@ describe('WorkflowStepsService', () => {
           .where(eq(schema.workflowSteps.workflowId, workflowA.id))
       ).map((r) => r.position);
       expect(new Set(positions).size).toBe(positions.length);
+    });
+  });
+
+  describe('reorder', () => {
+    async function seedFourSteps() {
+      const a = await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        position: 0,
+      });
+      const b = await createStep(db, workflowA.id, {
+        stepKey: 'b',
+        position: 1,
+      });
+      const c = await createStep(db, workflowA.id, {
+        stepKey: 'c',
+        position: 2,
+      });
+      const d = await createStep(db, workflowA.id, {
+        stepKey: 'd',
+        position: 3,
+      });
+      return { a, b, c, d };
+    }
+
+    it('lets an admin reverse an owned workflow steps order', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      const result = await service.reorder(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        { stepIds: [d.id, c.id, b.id, a.id] },
+      );
+
+      expect(result.map((s) => s.stepKey)).toEqual(['d', 'c', 'b', 'a']);
+      expect(result.map((s) => s.position)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('persists an arbitrary valid order correctly', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      await service.reorder(adminAActor, projectA.id, workflowA.id, {
+        stepIds: [c.id, a.id, d.id, b.id],
+      });
+
+      const persisted = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, workflowA.id))
+        .orderBy(asc(schema.workflowSteps.position));
+      expect(persisted.map((s) => s.stepKey)).toEqual(['c', 'a', 'd', 'b']);
+    });
+
+    it('assigns exactly contiguous 0..n-1 positions', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      const result = await service.reorder(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        { stepIds: [b.id, d.id, a.id, c.id] },
+      );
+
+      expect(result.map((s) => s.position)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('returns the response ordered exactly as the submitted stepIds', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      const result = await service.reorder(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        { stepIds: [b.id, d.id, a.id, c.id] },
+      );
+
+      expect(result.map((s) => s.id)).toEqual([b.id, d.id, a.id, c.id]);
+    });
+
+    it('succeeds as a no-op when submitting the current order', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      const result = await service.reorder(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        { stepIds: [a.id, b.id, c.id, d.id] },
+      );
+
+      expect(result.map((s) => [s.stepKey, s.position])).toEqual([
+        ['a', 0],
+        ['b', 1],
+        ['c', 2],
+        ['d', 3],
+      ]);
+    });
+
+    it('does not write any row when the submitted order is a no-op', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+      void b;
+      void c;
+
+      await service.reorder(adminAActor, projectA.id, workflowA.id, {
+        stepIds: [a.id, b.id, c.id, d.id],
+      });
+
+      const after = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.id, a.id));
+      expect(after[0].updatedAt.getTime()).toBe(a.updatedAt.getTime());
+    });
+
+    it('rejects a request missing a current step ID with conflict', async () => {
+      const { a, b, c } = await seedFourSteps();
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowA.id, {
+          stepIds: [a.id, b.id, c.id],
+        }),
+      ).rejects.toThrow(WorkflowStepOrderConflictError);
+    });
+
+    it('rejects a request with an extra unknown step ID with conflict', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowA.id, {
+          stepIds: [a.id, b.id, c.id, d.id, crypto.randomUUID()],
+        }),
+      ).rejects.toThrow(WorkflowStepOrderConflictError);
+    });
+
+    it('rejects a request containing a step ID from another workflow with conflict', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+      const foreign = await createStep(db, workflowB.id, { stepKey: 'x' });
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowA.id, {
+          stepIds: [a.id, b.id, c.id, foreign.id],
+        }),
+      ).rejects.toThrow(WorkflowStepOrderConflictError);
+
+      // d, the actually-missing step, still occupies its original position.
+      const dRow = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.id, d.id));
+      expect(dRow[0].position).toBe(3);
+    });
+
+    it('rejects a viewer attempting to reorder', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      await expect(
+        service.reorder(viewerAActor, projectA.id, workflowA.id, {
+          stepIds: [d.id, c.id, b.id, a.id],
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects another owner attempting to reorder with not found', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      // adminB does not own projectA at all, so this is caught by the
+      // project-ownership check rather than the workflow lookup — both
+      // are NotFoundException subclasses and produce the same 404.
+      await expect(
+        service.reorder(adminBActor, projectA.id, workflowA.id, {
+          stepIds: [d.id, c.id, b.id, a.id],
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a mismatched project/workflow hierarchy with not found', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowB.id, {
+          stepIds: [d.id, c.id, b.id, a.id],
+        }),
+      ).rejects.toThrow(WorkflowNotFoundError);
+    });
+
+    it('rejects reordering under a foreign project with not found', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      await expect(
+        service.reorder(adminAActor, projectB.id, workflowA.id, {
+          stepIds: [d.id, c.id, b.id, a.id],
+        }),
+      ).rejects.toThrow(ProjectNotFoundError);
+    });
+
+    it('never violates the unique position constraint during reorder', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      await service.reorder(adminAActor, projectA.id, workflowA.id, {
+        stepIds: [d.id, a.id, c.id, b.id],
+      });
+
+      const positions = (
+        await db
+          .select({ position: schema.workflowSteps.position })
+          .from(schema.workflowSteps)
+          .where(eq(schema.workflowSteps.workflowId, workflowA.id))
+      ).map((r) => r.position);
+      expect(new Set(positions).size).toBe(positions.length);
+      expect(positions.every((p) => p >= 0)).toBe(true);
+    });
+
+    it('leaves every original position untouched when the request is rejected before any write', async () => {
+      const { a, b, c } = await seedFourSteps();
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowA.id, {
+          stepIds: [a.id, b.id, c.id],
+        }),
+      ).rejects.toThrow(WorkflowStepOrderConflictError);
+
+      const persisted = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, workflowA.id))
+        .orderBy(asc(schema.workflowSteps.position));
+      expect(persisted.map((s) => [s.stepKey, s.position])).toEqual([
+        ['a', 0],
+        ['b', 1],
+        ['c', 2],
+        ['d', 3],
+      ]);
+      // No row was ever moved to a temporary position — the conflict is
+      // detected before applyContiguousPositions runs at all.
+      expect(persisted.every((s) => s.position < 4)).toBe(true);
+    });
+
+    it('bumps updatedAt only for steps whose position actually changes', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      // Swap only b and c; a and d keep their position.
+      await service.reorder(adminAActor, projectA.id, workflowA.id, {
+        stepIds: [a.id, c.id, b.id, d.id],
+      });
+
+      const rows = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, workflowA.id));
+      const byId = new Map(rows.map((row) => [row.id, row]));
+
+      expect(byId.get(a.id)?.updatedAt.getTime()).toBe(a.updatedAt.getTime());
+      expect(byId.get(d.id)?.updatedAt.getTime()).toBe(d.updatedAt.getTime());
+      expect(byId.get(b.id)?.updatedAt.getTime()).toBeGreaterThanOrEqual(
+        b.updatedAt.getTime(),
+      );
+      expect(byId.get(c.id)?.updatedAt.getTime()).toBeGreaterThanOrEqual(
+        c.updatedAt.getTime(),
+      );
+    });
+
+    it('leaves every other field unchanged besides position and updatedAt', async () => {
+      const { a, b, c, d } = await seedFourSteps();
+
+      const result = await service.reorder(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        { stepIds: [d.id, c.id, b.id, a.id] },
+      );
+
+      const dResult = result.find((s) => s.id === d.id);
+      expect(dResult).toMatchObject({
+        id: d.id,
+        workflowId: workflowA.id,
+        stepKey: 'd',
+        type: 'wait',
+        configuration: { seconds: 1 },
+        enabled: true,
+        createdAt: d.createdAt,
+      });
     });
   });
 });

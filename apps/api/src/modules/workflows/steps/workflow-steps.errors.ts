@@ -42,3 +42,22 @@ export class LastStepDeletionError extends ConflictException {
     );
   }
 }
+
+/**
+ * Thrown when a reorder request's `stepIds` array is structurally valid
+ * (an array of trimmed, unique, nonempty strings within the size limit)
+ * but does not exactly match the workflow's current step ID set — a
+ * missing current ID, an extra unknown ID, an ID belonging to another
+ * workflow, or a count mismatch. A single generic message is used in
+ * every case; it never discloses which specific submitted ID is missing,
+ * foreign, or extra, since that could reveal the existence of a step ID
+ * belonging to another actor's workflow.
+ */
+export class WorkflowStepOrderConflictError extends ConflictException {
+  constructor() {
+    super(
+      "The submitted step order does not match the workflow's current " +
+        'step set.',
+    );
+  }
+}

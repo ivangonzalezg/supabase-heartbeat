@@ -497,6 +497,14 @@ describe('Workflows API (e2e)', () => {
         '/api/projects/{projectId}/workflows/{workflowId}/steps/{stepId}'
       ].delete,
     ).toBeDefined();
+    expect(document.paths).toHaveProperty(
+      '/api/projects/{projectId}/workflows/{workflowId}/steps/order',
+    );
+    expect(
+      document.paths[
+        '/api/projects/{projectId}/workflows/{workflowId}/steps/order'
+      ].put,
+    ).toBeDefined();
   });
 
   describe('transactional creation with steps', () => {
@@ -829,6 +837,320 @@ describe('Workflows API (e2e)', () => {
         .set('Cookie', admin.cookie)
         .send({ stepKey: existingStepKey, type: 'signin', configuration: {} })
         .expect(409);
+    });
+  });
+
+  describe('workflow step reordering', () => {
+    async function createWorkflowWithFourSteps(
+      admin: SignedInUser,
+      projectId: string,
+    ): Promise<{ workflowId: string; stepIds: string[] }> {
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Reorderable workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            { stepKey: 'a', type: 'signin', configuration: {} },
+            { stepKey: 'b', type: 'wait', configuration: { seconds: 1 } },
+            { stepKey: 'c', type: 'wait', configuration: { seconds: 2 } },
+            { stepKey: 'd', type: 'signout', configuration: {} },
+          ],
+        })
+        .expect(201);
+      const body = createResponse.body as {
+        id: string;
+        steps: { id: string }[];
+      };
+      return {
+        workflowId: body.id,
+        stepIds: body.steps.map((s) => s.id),
+      };
+    }
+
+    it('rejects unauthenticated reorder requests', async () => {
+      await request(app.getHttpServer())
+        .put(
+          '/api/projects/some-project-id/workflows/some-workflow-id/steps/order',
+        )
+        .send({ stepIds: ['a', 'b'] })
+        .expect(401);
+    });
+
+    it('lets an admin create a workflow with steps and reorder them in one request', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+      const reversed = [...stepIds].reverse();
+
+      const reorderResponse = await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: reversed })
+        .expect(200);
+
+      const reordered = reorderResponse.body as {
+        id: string;
+        position: number;
+      }[];
+      expect(reordered.map((s) => s.id)).toEqual(reversed);
+      expect(reordered.map((s) => s.position)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('reflects the new order in workflow detail and list-steps', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+      const reversed = [...stepIds].reverse();
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: reversed })
+        .expect(200);
+
+      const detailResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectId}/workflows/${workflowId}`)
+        .set('Cookie', admin.cookie)
+        .expect(200);
+      expect(
+        (detailResponse.body as { steps: { id: string }[] }).steps.map(
+          (s) => s.id,
+        ),
+      ).toEqual(reversed);
+
+      const listResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectId}/workflows/${workflowId}/steps`)
+        .set('Cookie', admin.cookie)
+        .expect(200);
+      expect((listResponse.body as { id: string }[]).map((s) => s.id)).toEqual(
+        reversed,
+      );
+    });
+
+    it('succeeds as a no-op when submitting the current order', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+
+      const response = await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds })
+        .expect(200);
+
+      expect((response.body as { id: string }[]).map((s) => s.id)).toEqual(
+        stepIds,
+      );
+    });
+
+    it('rejects a reorder request missing a current step ID with 409', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: stepIds.slice(0, 3) })
+        .expect(409);
+    });
+
+    it('rejects a reorder request containing a foreign step ID with 409', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: [...stepIds, crypto.randomUUID()] })
+        .expect(409);
+    });
+
+    it('rejects a reorder request with a duplicate ID with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: [stepIds[0], stepIds[0], stepIds[2], stepIds[3]] })
+        .expect(400);
+    });
+
+    it('rejects an empty stepIds array with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: [] })
+        .expect(400);
+    });
+
+    it('rejects unexpected body fields with 400', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        admin,
+        projectId,
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds, positions: [0, 1, 2, 3] })
+        .expect(400);
+    });
+
+    it('lets a viewer read the order but rejects a viewer reorder attempt with 403', async () => {
+      const viewer = await createAndSignIn(
+        app,
+        `viewer-${crypto.randomUUID()}@example.com`,
+        'viewer',
+      );
+
+      const databaseService = app.get(DatabaseService);
+      const [project] = await databaseService.db
+        .insert(projects)
+        .values({
+          id: crypto.randomUUID(),
+          ownerId: viewer.userId,
+          name: 'Viewer Project',
+          supabaseUrl: 'https://viewer.supabase.co',
+          publishableKey: 'sb_publishable_viewer',
+        })
+        .returning();
+      const [workflow] = await databaseService.db
+        .insert(workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: project.id,
+          name: 'Viewer Workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      const [stepA] = await databaseService.db
+        .insert(workflowSteps)
+        .values({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          stepKey: 'a',
+          type: 'wait',
+          position: 0,
+          configuration: { seconds: 1 },
+        })
+        .returning();
+      const [stepB] = await databaseService.db
+        .insert(workflowSteps)
+        .values({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          stepKey: 'b',
+          type: 'wait',
+          position: 1,
+          configuration: { seconds: 1 },
+        })
+        .returning();
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${project.id}/workflows/${workflow.id}/steps/order`)
+        .set('Cookie', viewer.cookie)
+        .send({ stepIds: [stepB.id, stepA.id] })
+        .expect(403);
+    });
+
+    it('rejects reordering another owner workflow with 404', async () => {
+      const adminA = await createAndSignIn(
+        app,
+        `admin-a-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const adminB = await createAndSignIn(
+        app,
+        `admin-b-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectAId = await createProjectAs(app, adminA, 'Project A');
+      const { workflowId, stepIds } = await createWorkflowWithFourSteps(
+        adminA,
+        projectAId,
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectAId}/workflows/${workflowId}/steps/order`)
+        .set('Cookie', adminB.cookie)
+        .send({ stepIds: [...stepIds].reverse() })
+        .expect(404);
+
+      // Confirm the order is unaffected by the rejected attempt.
+      const listResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
+        .set('Cookie', adminA.cookie)
+        .expect(200);
+      expect((listResponse.body as { id: string }[]).map((s) => s.id)).toEqual(
+        stepIds,
+      );
     });
   });
 });

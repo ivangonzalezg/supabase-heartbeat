@@ -30,6 +30,7 @@ const mockWorkflowStepsService = {
   findById: jest.fn<WorkflowStepsService['findById']>(),
   update: jest.fn<WorkflowStepsService['update']>(),
   delete: jest.fn<WorkflowStepsService['delete']>(),
+  reorder: jest.fn<WorkflowStepsService['reorder']>(),
 };
 
 describe('WorkflowStepsController', () => {
@@ -146,5 +147,29 @@ describe('WorkflowStepsController', () => {
       'workflow-1',
       'step-1',
     );
+  });
+
+  it('reorder() delegates to the service with the actor, project ID, workflow ID, and input', async () => {
+    const reordered = [
+      { ...sampleStep, id: 'step-2', position: 0 },
+      { ...sampleStep, id: 'step-1', position: 1 },
+    ];
+    mockWorkflowStepsService.reorder.mockResolvedValue(reordered);
+    const input = { stepIds: ['step-2', 'step-1'] };
+
+    const result = await controller.reorder(
+      buildSession('admin'),
+      'project-1',
+      'workflow-1',
+      input,
+    );
+
+    expect(mockWorkflowStepsService.reorder).toHaveBeenCalledWith(
+      { userId: 'user-1', role: 'admin' },
+      'project-1',
+      'workflow-1',
+      input,
+    );
+    expect(result).toEqual(reordered);
   });
 });

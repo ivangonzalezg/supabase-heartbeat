@@ -26,8 +26,9 @@ Currently implemented:
   yet.
 * A Workflow Steps API
   (`/api/projects/:projectId/workflows/:workflowId/steps`), nested under
-  Workflows, for managing steps after creation — see "Workflow Steps API"
-  below.
+  Workflows, for managing steps after creation, including a complete-order
+  transactional reorder endpoint for the frontend's future drag-and-drop
+  editor — see "Workflow Steps API" below.
 * A browser-compatible shared validation package
   (`packages/validation`, `@supabase-heartbeat/validation`) providing Zod
   schemas and inferred types for workflow step configuration, reused by
@@ -39,8 +40,6 @@ Currently implemented:
 
 **Planned / not yet implemented:**
 
-* A dedicated bulk step-reorder endpoint (drag-and-drop); arbitrary
-  position changes via `PATCH` are intentionally rejected until then.
 * Manual/scheduled workflow execution, workflow runs, step runs, step
   executors, output references/interpolation between steps.
 * Project credentials (Supabase URL/keys used to actually run a `signin`
@@ -603,6 +602,7 @@ workflow's steps after the initial atomic creation described above.
 | Append a step to an owned workflow    |   Yes |     No |
 | Update a step in an owned workflow    |   Yes |     No |
 | Delete a step in an owned workflow    |   Yes |     No |
+| Reorder an owned workflow's steps     |   Yes |     No |
 
 **Ownership** is proven through the full hierarchy on every operation:
 `projects.id = :projectId AND projects.owner_id = actor.userId AND
@@ -625,16 +625,16 @@ race past the read. The database's own unique
 with `409 Conflict`.
 
 **Update step** (`PATCH`, body: any of `stepKey, type, configuration,
-enabled`): `position` is never accepted here either — a dedicated bulk
-reorder endpoint (e.g. `PUT .../steps/order`) is planned for a later
-task; arbitrary position changes via `PATCH` are intentionally rejected
-until then. If `type` or `configuration` changes, the **merged** result
-(the existing step, overridden by the patch) is re-validated as a whole
-pair through the shared validation package — so changing only `type`
-while an old, now-incompatible `configuration` remains from before is
-rejected unless a valid `configuration` for the new `type` is supplied in
-the same request. Renaming `stepKey` to a value already used by another
-step in the same workflow returns `409 Conflict`.
+enabled`): `position` is never accepted here — use `PUT .../steps/order`
+(below) to change step order; arbitrary position changes via `PATCH` are
+intentionally rejected. If `type` or `configuration` changes, the
+**merged** result (the existing step, overridden by the patch) is
+re-validated as a whole pair through the shared validation package — so
+changing only `type` while an old, now-incompatible `configuration`
+remains from before is rejected unless a valid `configuration` for the
+new `type` is supplied in the same request. Renaming `stepKey` to a value
+already used by another step in the same workflow returns
+`409 Conflict`.
 
 **Delete step** (`DELETE`, `204 No Content` on success): deletes the step
 and **compacts** the remaining steps' positions to stay contiguous in the
@@ -649,14 +649,57 @@ through the aggregate endpoint, and for consistency the same floor
 applies to deletion; delete the workflow itself instead (this cascades to
 all of its steps).
 
-**Not yet implemented**: a dedicated bulk reorder endpoint for
-drag-and-drop use cases. Until it exists, the only way to change step
-order is delete-and-recreate, or working through the aggregate create
-endpoint for a fresh workflow.
+**Reorder steps** (`PUT .../steps/order`, body: `{ stepIds: string[] }`,
+admin only): replaces the workflow's **complete** step order in one
+request — the primary way the frontend's future drag-and-drop workflow
+editor will persist a new order. `PUT` is used, not `PATCH`, because the
+request body replaces the entire ordering representation rather than
+describing a partial change; there is no insert-before/insert-after
+endpoint and no way to move a single step in isolation. `stepIds` must
+contain **every** one of the workflow's current step IDs exactly once —
+array order defines the final position (`stepIds[0]` becomes position
+`0`, and so on):
+
+* a missing current ID, an extra/unknown ID, an ID belonging to another
+  workflow, or a count mismatch is rejected with `409 Conflict`
+  (`WorkflowStepOrderConflictError`) and a single generic message —
+  which specific ID was missing, foreign, or extra is never disclosed;
+* a structurally malformed body (missing `stepIds`, not an array, empty,
+  non-string or empty-after-trim entries, a duplicate ID, more than
+  `MAX_STEPS_PER_WORKFLOW` entries, or an unexpected body property such
+  as `positions`, `workflowId`, `projectId`, `ownerId`, or `steps`) is
+  rejected with `400 Bad Request` before the database is touched at all
+  — duplicate IDs are never silently deduplicated;
+* submitting the current order is valid and is a no-op — it returns
+  `200 OK` with the current step list and performs zero database writes
+  (see "Timestamp policy" below).
+
+The entire operation — ownership verification, loading the current
+steps, validating the submitted ID set exactly matches, and the position
+rewrite — runs inside a single Drizzle/SQLite transaction
+(`WorkflowStepsService.reorder`). The rewrite reuses the same
+collision-safe two-pass strategy as delete compaction, extracted into a
+shared module-local helper (`applyContiguousPositions`, in
+`workflow-steps.service.ts`) used by both `delete()` and `reorder()`:
+every row whose position actually changes is first moved to a temporary
+position derived from `max(every row's current position,
+stepIds.length - 1) + 1` — strictly higher than both the final `0..n-1`
+range and every row's current position, so a temporary write can never
+collide with a real, not-yet-touched row — then rewritten to its final
+position. The database's unique `(workflow_id, position)` constraint
+remains the final safety net and is never relaxed.
+
+**Timestamp policy**: only steps whose position actually changes have
+their `updatedAt` bumped; a step already at its submitted target position
+is left completely untouched (including its own `updatedAt`). This was
+chosen over unconditionally touching every row so that a no-op reorder
+(submitting the current order) performs zero writes, and a partial
+reshuffle only reports the steps that actually moved as recently updated.
 
 **Swagger**: documented under the `Workflow Steps` tag, same
 `@ApiCookieAuth('better-auth.session_token')` convention as the rest of
-the API.
+the API. The reorder endpoint's description explicitly states the
+complete-list requirement.
 
 ## Shared validation package
 
@@ -805,6 +848,7 @@ PATCH  /api/projects/:projectId/workflows/:workflowId                     # Part
 DELETE /api/projects/:projectId/workflows/:workflowId                     # Delete a workflow and its steps (admin only)
 GET    /api/projects/:projectId/workflows/:workflowId/steps               # List a workflow's steps
 POST   /api/projects/:projectId/workflows/:workflowId/steps               # Append a step (admin only)
+PUT    /api/projects/:projectId/workflows/:workflowId/steps/order         # Replace the complete step order, transactionally (admin only)
 GET    /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Read a step
 PATCH  /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Partially update a step, excluding position (admin only)
 DELETE /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Delete a step and compact positions (admin only)

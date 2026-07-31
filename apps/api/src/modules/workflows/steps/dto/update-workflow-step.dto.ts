@@ -10,10 +10,10 @@ import { workflowStepTypes } from '@supabase-heartbeat/validation';
 
 /**
  * Allows partial updates to `stepKey`, `type`, `configuration`, and
- * `enabled`. `position` is intentionally never accepted here — arbitrary
- * position changes are out of scope for this task; a dedicated
- * transactional reorder endpoint will be added separately (see
- * apps/api/README.md).
+ * `enabled`. `position` is intentionally never accepted here — reordering
+ * requires submitting the complete desired step order through
+ * `PUT .../steps/order` (`WorkflowStepsService.reorder`), so a single
+ * step's position can never drift out of sync with its siblings.
  *
  * Unlike `CreateWorkflowStepDto`, this DTO does **not** validate
  * `type`/`configuration` together by itself: an update may change only
