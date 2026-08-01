@@ -194,7 +194,14 @@ describe('WorkflowsService', () => {
       const workflow = await service.create(adminAActor, projectA.id, {
         ...validCreateInput,
         steps: [
-          { stepKey: 'first', type: 'signin', configuration: {} },
+          {
+            stepKey: 'first',
+            type: 'signin',
+            configuration: {
+              email: 'heartbeat-user@example.com',
+              password: 'test-password',
+            },
+          },
           { stepKey: 'second', type: 'wait', configuration: { seconds: 1 } },
           { stepKey: 'third', type: 'signout', configuration: {} },
         ],
@@ -215,7 +222,14 @@ describe('WorkflowsService', () => {
         service.create(adminAActor, projectA.id, {
           ...validCreateInput,
           steps: [
-            { stepKey: 'first', type: 'signin', configuration: {} },
+            {
+              stepKey: 'first',
+              type: 'signin',
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'test-password',
+              },
+            },
             { stepKey: 'second', type: 'wait', configuration: { seconds: 1 } },
             // Duplicate stepKey within the same workflow forces the
             // database's own unique constraint to reject this insert,

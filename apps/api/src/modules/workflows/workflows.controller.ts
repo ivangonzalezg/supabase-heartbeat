@@ -26,6 +26,10 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { toAuthenticatedActor } from '../../lib/authorization/current-actor';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
+import {
+  WorkflowDetailResponseDto,
+  WorkflowResponseDto,
+} from './dto/workflow-response.dto';
 import { WorkflowsService } from './workflows.service';
 import type {
   WorkflowDetailResponse,
@@ -49,7 +53,10 @@ export class WorkflowsController {
       'created first). Both admin and viewer may call this. A project ' +
       'owned by another user (or nonexistent) is reported as 404.',
   })
-  @ApiOkResponse({ description: "The project's workflows." })
+  @ApiOkResponse({
+    description: "The project's workflows.",
+    type: [WorkflowResponseDto],
+  })
   @ApiNotFoundResponse({
     description: 'The project does not exist or is owned by another user.',
   })
@@ -79,6 +86,7 @@ export class WorkflowsController {
   })
   @ApiCreatedResponse({
     description: 'The created workflow, including its ordered steps.',
+    type: WorkflowDetailResponseDto,
   })
   @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
   @ApiNotFoundResponse({
@@ -109,6 +117,7 @@ export class WorkflowsController {
   })
   @ApiOkResponse({
     description: 'The requested workflow, including its ordered steps.',
+    type: WorkflowDetailResponseDto,
   })
   @ApiNotFoundResponse({
     description:
@@ -136,7 +145,10 @@ export class WorkflowsController {
       'workflow that does not exist, belongs to a different project, or ' +
       'whose project is owned by another user is reported as 404.',
   })
-  @ApiOkResponse({ description: 'The updated workflow.' })
+  @ApiOkResponse({
+    description: 'The updated workflow.',
+    type: WorkflowResponseDto,
+  })
   @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
   @ApiNotFoundResponse({
     description:

@@ -57,16 +57,36 @@ describe('workflowStepCreateSchema', () => {
       workflowStepCreateSchema.safeParse({
         stepKey: 'sign-in',
         type: 'signin',
-        configuration: {},
+        configuration: { email: 'a@example.com', password: 'secret' },
       }).success,
     ).toBe(true);
   });
 
-  it('rejects a signin step with credential-shaped configuration', () => {
+  it('rejects a signin step with an empty configuration', () => {
     expect(
       workflowStepCreateSchema.safeParse({
         stepKey: 'sign-in',
         type: 'signin',
+        configuration: {},
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a signin step with a mismatched configuration (wait-shaped)', () => {
+    expect(
+      workflowStepCreateSchema.safeParse({
+        stepKey: 'sign-in',
+        type: 'signin',
+        configuration: { seconds: 10 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a signin-shaped configuration used for another type', () => {
+    expect(
+      workflowStepCreateSchema.safeParse({
+        stepKey: 'pause',
+        type: 'wait',
         configuration: { email: 'a@example.com', password: 'secret' },
       }).success,
     ).toBe(false);
@@ -106,7 +126,7 @@ describe('workflowStepCreateSchema', () => {
     const result = workflowStepCreateSchema.safeParse({
       stepKey: 'sign-in',
       type: 'signin',
-      configuration: {},
+      configuration: { email: 'a@example.com', password: 'secret' },
       enabled: false,
     });
     expect(result.success).toBe(true);
@@ -120,7 +140,7 @@ describe('workflowStepCreateSchema', () => {
       workflowStepCreateSchema.safeParse({
         stepKey: 'sign-in',
         type: 'signin',
-        configuration: {},
+        configuration: { email: 'a@example.com', password: 'secret' },
         position: 0,
       }).success,
     ).toBe(false);
@@ -128,7 +148,7 @@ describe('workflowStepCreateSchema', () => {
       workflowStepCreateSchema.safeParse({
         stepKey: 'sign-in',
         type: 'signin',
-        configuration: {},
+        configuration: { email: 'a@example.com', password: 'secret' },
         id: 'some-id',
       }).success,
     ).toBe(false);
@@ -138,7 +158,7 @@ describe('workflowStepCreateSchema', () => {
     expect(
       workflowStepCreateSchema.safeParse({
         type: 'signin',
-        configuration: {},
+        configuration: { email: 'a@example.com', password: 'secret' },
       }).success,
     ).toBe(false);
   });

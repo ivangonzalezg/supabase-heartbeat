@@ -524,7 +524,14 @@ describe('Workflows API (e2e)', () => {
           cronExpression: '0 * * * *',
           timezone: 'UTC',
           steps: [
-            { stepKey: 'first', type: 'signin', configuration: {} },
+            {
+              stepKey: 'first',
+              type: 'signin',
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'test-password',
+              },
+            },
             { stepKey: 'second', type: 'wait', configuration: { seconds: 1 } },
             { stepKey: 'third', type: 'signout', configuration: {} },
           ],
@@ -586,7 +593,14 @@ describe('Workflows API (e2e)', () => {
           cronExpression: '0 * * * *',
           timezone: 'UTC',
           steps: [
-            { stepKey: 'same', type: 'signin', configuration: {} },
+            {
+              stepKey: 'same',
+              type: 'signin',
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'test-password',
+              },
+            },
             { stepKey: 'same', type: 'signout', configuration: {} },
           ],
         })
@@ -634,7 +648,10 @@ describe('Workflows API (e2e)', () => {
             {
               stepKey: 'first',
               type: 'signin',
-              configuration: {},
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'test-password',
+              },
               position: 5,
             },
           ],
@@ -689,7 +706,14 @@ describe('Workflows API (e2e)', () => {
       await request(app.getHttpServer())
         .post(`/api/projects/${projectAId}/workflows/${workflowId}/steps`)
         .set('Cookie', adminB.cookie)
-        .send({ stepKey: 'intruder', type: 'signin', configuration: {} })
+        .send({
+          stepKey: 'intruder',
+          type: 'signin',
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
+        })
         .expect(404);
       await request(app.getHttpServer())
         .get(
@@ -800,7 +824,14 @@ describe('Workflows API (e2e)', () => {
       await request(app.getHttpServer())
         .post(`/api/projects/${project.id}/workflows/${workflow.id}/steps`)
         .set('Cookie', viewer.cookie)
-        .send({ stepKey: 'new', type: 'signin', configuration: {} })
+        .send({
+          stepKey: 'new',
+          type: 'signin',
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
+        })
         .expect(403);
       await request(app.getHttpServer())
         .patch(
@@ -835,7 +866,14 @@ describe('Workflows API (e2e)', () => {
       await request(app.getHttpServer())
         .post(`/api/projects/${projectId}/workflows/${workflowId}/steps`)
         .set('Cookie', admin.cookie)
-        .send({ stepKey: existingStepKey, type: 'signin', configuration: {} })
+        .send({
+          stepKey: existingStepKey,
+          type: 'signin',
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
+        })
         .expect(409);
     });
   });
@@ -853,7 +891,14 @@ describe('Workflows API (e2e)', () => {
           cronExpression: '0 * * * *',
           timezone: 'UTC',
           steps: [
-            { stepKey: 'a', type: 'signin', configuration: {} },
+            {
+              stepKey: 'a',
+              type: 'signin',
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'test-password',
+              },
+            },
             { stepKey: 'b', type: 'wait', configuration: { seconds: 1 } },
             { stepKey: 'c', type: 'wait', configuration: { seconds: 2 } },
             { stepKey: 'd', type: 'signout', configuration: {} },
@@ -1151,6 +1196,276 @@ describe('Workflows API (e2e)', () => {
       expect((listResponse.body as { id: string }[]).map((s) => s.id)).toEqual(
         stepIds,
       );
+    });
+  });
+
+  describe('signin step credentials', () => {
+    it('accepts a valid signin step in aggregate workflow creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Signin workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'sign-in',
+              type: 'signin',
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'test-password',
+              },
+            },
+          ],
+        })
+        .expect(201);
+
+      const body = response.body as {
+        steps: { type: string; configuration: Record<string, unknown> }[];
+      };
+      expect(body.steps[0].type).toBe('signin');
+      expect(body.steps[0].configuration).toEqual({
+        email: 'heartbeat-user@example.com',
+        password: 'test-password',
+      });
+    });
+
+    it('rejects an empty signin configuration in aggregate workflow creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Signin workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [{ stepKey: 'sign-in', type: 'signin', configuration: {} }],
+        })
+        .expect(400);
+    });
+
+    it('reports a useful nested path when a signin step is invalid in aggregate creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Signin workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'sign-in',
+              type: 'signin',
+              configuration: { email: 'heartbeat-user@example.com' },
+            },
+          ],
+        })
+        .expect(400);
+
+      const message = JSON.stringify(response.body);
+      expect(message).toContain('steps.0');
+      expect(message).toContain('configuration.password');
+    });
+
+    it('accepts valid signin credentials for individual step creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send(validWorkflowInput)
+        .expect(201);
+      const workflowId = (createResponse.body as WorkflowResponseBody).id;
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflowId}/steps`)
+        .set('Cookie', admin.cookie)
+        .send({
+          stepKey: 'sign-in',
+          type: 'signin',
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
+        })
+        .expect(201);
+
+      const body = response.body as {
+        type: string;
+        configuration: Record<string, unknown>;
+      };
+      expect(body.type).toBe('signin');
+      expect(body.configuration).toEqual({
+        email: 'heartbeat-user@example.com',
+        password: 'test-password',
+      });
+    });
+
+    it('validates the merged signin configuration on individual step update', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Signin workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'sign-in',
+              type: 'signin',
+              configuration: {
+                email: 'heartbeat-user@example.com',
+                password: 'old-password',
+              },
+            },
+          ],
+        })
+        .expect(201);
+      const body = createResponse.body as {
+        id: string;
+        steps: { id: string }[];
+      };
+
+      const updateResponse = await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectId}/workflows/${body.id}/steps/${body.steps[0].id}`,
+        )
+        .set('Cookie', admin.cookie)
+        .send({
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'new-password',
+          },
+        })
+        .expect(200);
+
+      expect(
+        (updateResponse.body as { configuration: Record<string, unknown> })
+          .configuration,
+      ).toEqual({
+        email: 'heartbeat-user@example.com',
+        password: 'new-password',
+      });
+    });
+
+    it('rejects changing another step to signin without valid credentials', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send(validWorkflowInput)
+        .expect(201);
+      const body = createResponse.body as {
+        id: string;
+        steps: { id: string }[];
+      };
+
+      await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectId}/workflows/${body.id}/steps/${body.steps[0].id}`,
+        )
+        .set('Cookie', admin.cookie)
+        .send({ type: 'signin' })
+        .expect(400);
+    });
+
+    it('accepts changing another step to signin with valid credentials', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const createResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send(validWorkflowInput)
+        .expect(201);
+      const body = createResponse.body as {
+        id: string;
+        steps: { id: string }[];
+      };
+
+      const updateResponse = await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectId}/workflows/${body.id}/steps/${body.steps[0].id}`,
+        )
+        .set('Cookie', admin.cookie)
+        .send({
+          type: 'signin',
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
+        })
+        .expect(200);
+
+      expect((updateResponse.body as { type: string }).type).toBe('signin');
+    });
+
+    it('never includes the submitted password in an error response', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const secret = 'super-secret-should-not-leak-in-error';
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Signin workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'sign-in',
+              type: 'signin',
+              configuration: { email: 'not-an-email', password: secret },
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(JSON.stringify(response.body)).not.toContain(secret);
     });
   });
 });

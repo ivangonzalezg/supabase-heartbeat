@@ -249,7 +249,10 @@ describe('WorkflowStepsService', () => {
         {
           stepKey: 'first',
           type: 'signin',
-          configuration: {},
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
         },
       );
 
@@ -282,7 +285,10 @@ describe('WorkflowStepsService', () => {
         service.create(viewerAActor, projectA.id, workflowA.id, {
           stepKey: 'first',
           type: 'signin',
-          configuration: {},
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
         }),
       ).rejects.toThrow(ForbiddenException);
     });
@@ -294,7 +300,10 @@ describe('WorkflowStepsService', () => {
         service.create(adminAActor, projectA.id, workflowA.id, {
           stepKey: 'dup',
           type: 'signin',
-          configuration: {},
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
         }),
       ).rejects.toThrow(DuplicateStepKeyError);
     });
@@ -304,7 +313,10 @@ describe('WorkflowStepsService', () => {
         service.create(adminAActor, projectA.id, workflowB.id, {
           stepKey: 'first',
           type: 'signin',
-          configuration: {},
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
         }),
       ).rejects.toThrow(WorkflowNotFoundError);
     });
@@ -360,6 +372,94 @@ describe('WorkflowStepsService', () => {
 
       expect(updated.type).toBe('signout');
       expect(updated.configuration).toEqual({});
+    });
+
+    it('rejects changing another step to signin without valid credentials', async () => {
+      const step = await createStep(db, workflowA.id, {
+        stepKey: 'wait-step',
+        type: 'wait',
+        configuration: { seconds: 1 },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, step.id, {
+          type: 'signin',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts changing another step to signin with valid credentials', async () => {
+      const step = await createStep(db, workflowA.id, {
+        stepKey: 'wait-step',
+        type: 'wait',
+        configuration: { seconds: 1 },
+      });
+
+      const updated = await service.update(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        step.id,
+        {
+          type: 'signin',
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'test-password',
+          },
+        },
+      );
+
+      expect(updated.type).toBe('signin');
+      expect(updated.configuration).toEqual({
+        email: 'heartbeat-user@example.com',
+        password: 'test-password',
+      });
+    });
+
+    it('validates the merged signin configuration when only the password changes', async () => {
+      const step = await createStep(db, workflowA.id, {
+        stepKey: 'sign-in',
+        type: 'signin',
+        configuration: {
+          email: 'heartbeat-user@example.com',
+          password: 'old-password',
+        },
+      });
+
+      const updated = await service.update(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        step.id,
+        {
+          configuration: {
+            email: 'heartbeat-user@example.com',
+            password: 'new-password',
+          },
+        },
+      );
+
+      expect(updated.configuration).toEqual({
+        email: 'heartbeat-user@example.com',
+        password: 'new-password',
+      });
+    });
+
+    it('rejects an update that would leave a signin step with an empty configuration', async () => {
+      const step = await createStep(db, workflowA.id, {
+        stepKey: 'sign-in',
+        type: 'signin',
+        configuration: {
+          email: 'heartbeat-user@example.com',
+          password: 'test-password',
+        },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, step.id, {
+          configuration: {},
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('updates enabled independently', async () => {

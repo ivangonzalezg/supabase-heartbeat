@@ -12,9 +12,48 @@ describe('CreateWorkflowStepDto', () => {
     const errors = await validateInput({
       stepKey: 'sign-in',
       type: 'signin',
-      configuration: {},
+      configuration: {
+        email: 'heartbeat-user@example.com',
+        password: 'test-password',
+      },
     });
     expect(errors).toHaveLength(0);
+  });
+
+  it('rejects a signin step with an empty configuration', async () => {
+    const errors = await validateInput({
+      stepKey: 'sign-in',
+      type: 'signin',
+      configuration: {},
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('reports a useful nested path for an invalid signin configuration', async () => {
+    const errors = await validateInput({
+      stepKey: 'sign-in',
+      type: 'signin',
+      configuration: { email: 'heartbeat-user@example.com' },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    const message = errors
+      .flatMap((error) => Object.values(error.constraints ?? {}))
+      .join(' ');
+    expect(message).toContain('configuration.password');
+  });
+
+  it('never includes the submitted password value in a validation error', async () => {
+    const secret = 'super-secret-should-not-leak';
+    const errors = await validateInput({
+      stepKey: 'sign-in',
+      type: 'signin',
+      configuration: { email: 'not-an-email', password: secret },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    const message = errors
+      .flatMap((error) => Object.values(error.constraints ?? {}))
+      .join(' ');
+    expect(message).not.toContain(secret);
   });
 
   it('accepts a valid wait step', async () => {
@@ -39,7 +78,10 @@ describe('CreateWorkflowStepDto', () => {
     const errors = await validateInput({
       stepKey: 'Sign In',
       type: 'signin',
-      configuration: {},
+      configuration: {
+        email: 'heartbeat-user@example.com',
+        password: 'test-password',
+      },
     });
     expect(errors.length).toBeGreaterThan(0);
   });

@@ -30,6 +30,7 @@ import { toAuthenticatedActor } from '../../../lib/authorization/current-actor';
 import { CreateWorkflowStepDto } from './dto/create-workflow-step.dto';
 import { ReorderWorkflowStepsDto } from './dto/reorder-workflow-steps.dto';
 import { UpdateWorkflowStepDto } from './dto/update-workflow-step.dto';
+import { WorkflowStepResponseDto } from './dto/workflow-step-response.dto';
 import { WorkflowStepsService } from './workflow-steps.service';
 import type { WorkflowStepResponse } from './workflow-steps.types';
 
@@ -51,7 +52,10 @@ export class WorkflowStepsController {
       'workflow that does not exist, or is not accessible to the ' +
       'current actor, is reported as 404.',
   })
-  @ApiOkResponse({ description: "The workflow's ordered steps." })
+  @ApiOkResponse({
+    description: "The workflow's ordered steps.",
+    type: [WorkflowStepResponseDto],
+  })
   @ApiNotFoundResponse({
     description:
       'The project or workflow does not exist, or is not accessible to ' +
@@ -82,7 +86,10 @@ export class WorkflowStepsController {
       'reported as 409. A project or workflow that does not exist, or is ' +
       'not accessible to the current actor, is reported as 404.',
   })
-  @ApiCreatedResponse({ description: 'The created step.' })
+  @ApiCreatedResponse({
+    description: 'The created step.',
+    type: WorkflowStepResponseDto,
+  })
   @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
   @ApiNotFoundResponse({
     description:
@@ -129,6 +136,7 @@ export class WorkflowStepsController {
   })
   @ApiOkResponse({
     description: 'The complete step list in its new order.',
+    type: [WorkflowStepResponseDto],
   })
   @ApiBadRequestResponse({
     description:
@@ -172,7 +180,10 @@ export class WorkflowStepsController {
       'whose workflow/project is not accessible to the current actor is ' +
       'reported as 404, identically in every case.',
   })
-  @ApiOkResponse({ description: 'The requested step.' })
+  @ApiOkResponse({
+    description: 'The requested step.',
+    type: WorkflowStepResponseDto,
+  })
   @ApiNotFoundResponse({
     description:
       'The project, workflow, or step does not exist, or is not ' +
@@ -206,7 +217,10 @@ export class WorkflowStepsController {
       'remains from before is rejected. A `stepKey` already used by ' +
       'another step in the same workflow is reported as 409.',
   })
-  @ApiOkResponse({ description: 'The updated step.' })
+  @ApiOkResponse({
+    description: 'The updated step.',
+    type: WorkflowStepResponseDto,
+  })
   @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
   @ApiNotFoundResponse({
     description:

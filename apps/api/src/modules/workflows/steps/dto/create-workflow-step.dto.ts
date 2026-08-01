@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiExtraModels,
+  ApiProperty,
+  ApiPropertyOptional,
+  getSchemaPath,
+} from '@nestjs/swagger';
 import {
   IsBoolean,
   IsIn,
@@ -8,6 +13,54 @@ import {
 } from 'class-validator';
 import { workflowStepTypes } from '@supabase-heartbeat/validation';
 import { IsWorkflowStepInput } from '../validation/workflow-step.validator';
+import {
+  DeleteStepConfigurationDto,
+  InsertStepConfigurationDto,
+  InvokeFunctionStepConfigurationDto,
+  ReadStepConfigurationDto,
+  SigninStepConfigurationDto,
+  SignoutStepConfigurationDto,
+  UpdateStepConfigurationDto,
+  WaitStepConfigurationDto,
+} from './step-configurations';
+
+/**
+ * Maps each step `type` to the OpenAPI schema documenting its
+ * `configuration` shape. Used to build the `configuration` property's
+ * `oneOf` below and kept in one place so every DTO/response that needs
+ * to reference "the configuration model for this type" stays in sync.
+ */
+export const STEP_CONFIGURATION_SCHEMAS_BY_TYPE = {
+  signin: SigninStepConfigurationDto,
+  signout: SignoutStepConfigurationDto,
+  wait: WaitStepConfigurationDto,
+  insert: InsertStepConfigurationDto,
+  read: ReadStepConfigurationDto,
+  update: UpdateStepConfigurationDto,
+  delete: DeleteStepConfigurationDto,
+  invoke_function: InvokeFunctionStepConfigurationDto,
+} as const satisfies Record<(typeof workflowStepTypes)[number], unknown>;
+
+const STEP_CONFIGURATION_MODELS = Object.values(
+  STEP_CONFIGURATION_SCHEMAS_BY_TYPE,
+);
+
+/**
+ * A human-readable `type` → configuration-model mapping, included in the
+ * `configuration` property's description as a fallback for API
+ * consumers whose tooling does not render `oneOf` particularly well —
+ * `@nestjs/swagger` (this project's current version) cannot express a
+ * single discriminated schema across an entire flat DTO class the way a
+ * true `oneOf [{ properties: { type: const, configuration: $ref } }, ...]`
+ * at the object level would, so `configuration`'s own schema is a
+ * `oneOf` of every possible shape, and this text spells out which one
+ * applies for which `type`.
+ */
+const STEP_TYPE_CONFIGURATION_TABLE = Object.entries(
+  STEP_CONFIGURATION_SCHEMAS_BY_TYPE,
+)
+  .map(([type, dto]) => `\`${type}\` → \`${dto.name}\``)
+  .join(', ');
 
 /**
  * The raw create-step input, as received over HTTP: `stepKey`, `type`,
@@ -23,10 +76,13 @@ import { IsWorkflowStepInput } from '../validation/workflow-step.validator';
  * `{ type: 'wait', configuration: { table: '...' } }`) structurally
  * rejected — is `@IsWorkflowStepInput()`, using the shared
  * `@supabase-heartbeat/validation` schema (the same schema a future
- * frontend will use). `@nestjs/swagger` cannot infer that discriminated
- * shape automatically from plain class properties, so the properties
- * below exist to document the request shape for Swagger.
+ * frontend will use). The `*StepConfigurationDto` classes referenced
+ * below are documentation-only adapters (see
+ * `SigninStepConfigurationDto`'s own comment) — they never participate
+ * in runtime validation; the shared Zod schema remains the sole runtime
+ * source of truth.
  */
+@ApiExtraModels(...STEP_CONFIGURATION_MODELS)
 export class CreateWorkflowStepDto {
   @ApiProperty({
     description:
@@ -49,10 +105,13 @@ export class CreateWorkflowStepDto {
 
   @ApiProperty({
     description:
-      "The step's configuration. Its required shape depends on `type` " +
-      '— see the Workflows API documentation for the schema of each ' +
-      'step type.',
-    example: {},
+      'The step configuration. Its required shape depends on `type` — ' +
+      'the selected shape below MUST correspond to `type`: ' +
+      `${STEP_TYPE_CONFIGURATION_TABLE}. Submitting a shape that does ` +
+      'not match `type` is rejected with 400 Bad Request.',
+    oneOf: STEP_CONFIGURATION_MODELS.map((model) => ({
+      $ref: getSchemaPath(model),
+    })),
   })
   @IsObject()
   configuration!: Record<string, unknown>;

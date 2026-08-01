@@ -723,13 +723,13 @@ Key exports:
   from `apps/api/src/database/schema/types.ts` — moving them here
   required no migration, confirmed via `db:check`).
 * Per-step-type configuration schemas for all 8 MVP step types:
-  `signin` (`{}`), `signout` (`{}`), `wait` (`{ seconds: integer >= 1,
-  <= 3600 }`), `insert` (`{ table, values: nonempty JSON object }`),
-  `read` (`{ table, columns?, limit? <= 1000 }`), `update` (`{ table,
-  values, filter: { column, operator: 'eq', value } }`), `delete` (`{
-  table, filter }` — `filter` is required, never optional), and
-  `invoke_function` (`{ functionName, body? }`). Every schema rejects
-  unknown properties.
+  `signin` (`{ email, password }` — see below), `signout` (`{}`), `wait`
+  (`{ seconds: integer >= 1, <= 3600 }`), `insert` (`{ table, values:
+  nonempty JSON object }`), `read` (`{ table, columns?, limit? <= 1000
+  }`), `update` (`{ table, values, filter: { column, operator: 'eq',
+  value } }`), `delete` (`{ table, filter }` — `filter` is required,
+  never optional), and `invoke_function` (`{ functionName, body? }`).
+  Every schema rejects unknown properties.
 * `workflowStepConfigurationSchema` / `parseWorkflowStepConfiguration` —
   validates a `type`/`configuration` pair alone (used when merging an
   update's patch onto an existing step for re-validation).
@@ -741,12 +741,66 @@ Key exports:
   letters/digits/hyphens/underscores only (whitespace and dots
   rejected, never silently stripped).
 
-**`signin` cannot execute anything yet**: its configuration schema is
-intentionally empty (`{}`). There is no project credential model in this
-codebase, so a `signin` step has nowhere to source
-email/password/service-role credentials from. Workflow steps never carry
-credentials — adding them here would be premature ahead of a project
-credential model, which is out of scope for this task.
+**`signin` requires Supabase credentials**: its configuration is
+`{ email: string, password: string }` — the specific Supabase user this
+step authenticates as. `email` is trimmed and must be a valid email
+address; `password` must be nonempty, is **not** trimmed (leading/
+trailing whitespace is a valid password character and is preserved
+exactly), and is bounded by `SIGNIN_PASSWORD_MAX_LENGTH` (128). No
+password-complexity rule is enforced. Unknown properties (e.g.
+`username`) are rejected, and the previously-accepted empty `{}`
+configuration is now rejected.
+
+An invalid step configuration — for `signin` or any other type — is
+rejected with `400 Bad Request` and an error message that identifies a
+useful nested field path (e.g. `steps.0.step configuration.password:
+Invalid input: expected string, received undefined` for the aggregate
+create endpoint, or `configuration.email` for individual step
+create/update), never a raw Zod internal, a stack trace, or the
+submitted value itself — a password is never echoed back in a
+validation error, whether it is invalid, too long, or simply missing.
+
+Credentials are stored **exactly as submitted** inside
+`workflow_steps.configuration` — the same JSON column every step type's
+configuration lives in. There is no separate project-level credential
+table: each `signin` step carries its own credentials independently, so
+different `signin` steps (even within the same workflow) may
+authenticate as different Supabase users. This API does **not**
+encrypt, hash, or mask these credentials, and does not currently return
+a redacted value — reading a `signin` step back (via list/read/detail
+endpoints) returns the stored `email`/`password` unchanged. Workflow
+execution itself (actually calling Supabase with these credentials) is
+still not implemented; this schema only validates the step's shape.
+
+**OpenAPI documentation of step configuration shapes**: `configuration`
+is not documented as a generic object. Each of the 8 step types has a
+dedicated, documentation-only Swagger model
+(`apps/api/src/modules/workflows/steps/dto/step-configurations/`, e.g.
+`SigninStepConfigurationDto`, `WaitStepConfigurationDto`) mirroring its
+shared Zod schema's shape, description, and examples — these classes
+carry no `class-validator` decorators and are never used to validate a
+request; the shared Zod schemas above remain the sole runtime source of
+truth. `CreateWorkflowStepDto.configuration`,
+`UpdateWorkflowStepDto.configuration`, and
+`WorkflowStepResponseDto.configuration` all document `configuration` as
+an OpenAPI `oneOf` referencing every one of the 8 models (via
+`@ApiExtraModels` + `getSchemaPath`), and each property's description
+spells out the `type` → configuration-model mapping in plain text. A
+single flat DTO class cannot express "this specific shape applies only
+when `type` equals this specific value" as a true correlated
+discriminator without hand-written custom schema code that would risk
+producing an invalid or Swagger-UI-breaking document — this `oneOf` +
+mapping-table approach was chosen after inspecting the generated
+`/api/openapi.json` and confirming it renders correctly, is valid
+OpenAPI 3.1, and communicates the type/configuration relationship
+clearly, without duplicating any validation logic. `CreateWorkflowDto.steps`
+(the aggregate creation endpoint) references `CreateWorkflowStepDto`
+directly, so it inherits the same `configuration` documentation
+automatically. The password field on `SigninStepConfigurationDto` is
+marked `format: 'password'` (a UI hint, not a validation rule); it is
+**not** marked `writeOnly`, since the API's actual response behavior
+does not omit or redact it — the OpenAPI document describes the real
+current behavior, not an aspirational one.
 
 Commands (run from the repository root, or via
 `yarn workspace @supabase-heartbeat/validation <script>`):

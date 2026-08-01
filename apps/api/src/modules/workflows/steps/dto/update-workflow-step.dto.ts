@@ -1,4 +1,8 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiExtraModels,
+  ApiPropertyOptional,
+  getSchemaPath,
+} from '@nestjs/swagger';
 import {
   IsBoolean,
   IsIn,
@@ -7,6 +11,17 @@ import {
   IsString,
 } from 'class-validator';
 import { workflowStepTypes } from '@supabase-heartbeat/validation';
+import { STEP_CONFIGURATION_SCHEMAS_BY_TYPE } from './create-workflow-step.dto';
+
+const STEP_CONFIGURATION_MODELS = Object.values(
+  STEP_CONFIGURATION_SCHEMAS_BY_TYPE,
+);
+
+const STEP_TYPE_CONFIGURATION_TABLE = Object.entries(
+  STEP_CONFIGURATION_SCHEMAS_BY_TYPE,
+)
+  .map(([type, dto]) => `\`${type}\` → \`${dto.name}\``)
+  .join(', ');
 
 /**
  * Allows partial updates to `stepKey`, `type`, `configuration`, and
@@ -21,7 +36,13 @@ import { workflowStepTypes } from '@supabase-heartbeat/validation';
  * so the combined pair can only be validated once merged with the
  * step's current row — `WorkflowStepsService.update` does that merge and
  * re-validates the result via `parseWorkflowStepConfiguration`.
+ *
+ * Reuses `CreateWorkflowStepDto`'s `STEP_CONFIGURATION_SCHEMAS_BY_TYPE`
+ * mapping for its own `configuration` `oneOf`, so the two DTOs' Swagger
+ * documentation of "which configuration shape belongs to which type"
+ * never drifts out of sync.
  */
+@ApiExtraModels(...STEP_CONFIGURATION_MODELS)
 export class UpdateWorkflowStepDto {
   @ApiPropertyOptional({
     description:
@@ -46,8 +67,12 @@ export class UpdateWorkflowStepDto {
     description:
       "The step's configuration. If provided together with `type`, or " +
       "alone while the step's existing `type` stays the same, the " +
-      'resulting merged pair is validated as a whole.',
-    example: {},
+      'resulting merged pair is validated as a whole. The selected ' +
+      'shape below MUST correspond to the (possibly merged) `type`: ' +
+      `${STEP_TYPE_CONFIGURATION_TABLE}.`,
+    oneOf: STEP_CONFIGURATION_MODELS.map((model) => ({
+      $ref: getSchemaPath(model),
+    })),
   })
   @IsOptional()
   @IsObject()
