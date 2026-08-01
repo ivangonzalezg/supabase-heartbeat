@@ -34,21 +34,30 @@ Currently implemented:
   schemas and inferred types for workflow step configuration, reused by
   this API and intended for a future frontend — see "Shared validation
   package" below.
+* An internal workflow-execution foundation
+  (`src/modules/workflow-execution/`) — a `StepExecutor` contract, a
+  NestJS-discovery-based executor registry, a per-run Supabase client
+  factory/execution context, and working `signin`/`signout`/`wait`
+  executors. This is architecture only: there is no orchestration loop,
+  no `workflow_runs`/`step_runs` persistence, and no HTTP endpoint or
+  scheduler that actually runs a workflow yet — see "Workflow execution
+  foundation" below.
 * A development proxy that forwards non-API requests to the Vite dev
   server, so the browser only ever talks to this API.
 * Production static hosting of the compiled frontend, with an SPA fallback.
 
 **Planned / not yet implemented:**
 
-* Manual/scheduled workflow execution, workflow runs, step runs, step
-  executors, output references/interpolation between steps.
-* Project credentials (Supabase URL/keys used to actually run a `signin`
-  step) — step configuration validation exists, but no step can execute
-  yet.
+* The workflow-run orchestration loop, `workflow_runs`/`step_runs`
+  persistence, a manual-run HTTP endpoint, scheduler integration, and
+  `insert`/`read`/`update`/`delete`/`invoke_function` executors —
+  output-reference resolution between steps, retries, cancellation, and
+  timeout policy all depend on this and are not implemented either.
 * Project sharing / multi-user access to the same project.
 * Frontend administration UI for creating additional users.
 * Business logic beyond the health check, authentication foundation,
-  Projects API, Workflows API, and Workflow Steps API.
+  Projects API, Workflows API, Workflow Steps API, and the
+  workflow-execution foundation.
 
 ## Current stack
 
@@ -79,8 +88,9 @@ src/
     ├── auth/        # Better Auth config, permissions, first-admin bootstrap (see "First-administrator bootstrap")
     ├── health/      # GET /api/health
     ├── projects/    # Projects API — CRUD with ownership authorization (see "Projects API")
-    └── workflows/   # Workflows API — nested under Projects (see "Workflows API")
-        └── steps/   # Workflow Steps API — nested under Workflows (see "Workflow Steps API")
+    ├── workflows/   # Workflows API — nested under Projects (see "Workflows API")
+    │   └── steps/   # Workflow Steps API — nested under Workflows (see "Workflow Steps API")
+    └── workflow-execution/ # Executor contract, registry, context, signin/signout/wait executors (see "Workflow execution foundation")
 ```
 
 `packages/validation` (`@supabase-heartbeat/validation`) is a separate,
@@ -701,6 +711,87 @@ reshuffle only reports the steps that actually moved as recently updated.
 the API. The reorder endpoint's description explicitly states the
 complete-list requirement.
 
+## Workflow execution foundation
+
+`src/modules/workflow-execution/` (`WorkflowExecutionModule`) is the
+internal architecture for executing workflow steps. **This is a
+foundation only**: there is no workflow-run orchestration loop, no
+`workflow_runs`/`step_runs` persistence, no manual-run HTTP endpoint,
+and no scheduler integration yet. Nothing in this module is reachable
+from an HTTP route — it has no controller.
+
+**One Supabase client per future workflow run.** A future workflow
+engine will call `WorkflowExecutionContextFactory.create({ projectId,
+workflowId, supabaseUrl, publishableKey })` once per run, producing a
+`WorkflowExecutionContext` that every step executor invoked during that
+run receives. `supabaseUrl` and `publishableKey` come from the owning
+project (`ProjectsService`, unchanged by this task) — the context
+factory does no database access itself; the engine is responsible for
+loading the project first. The Supabase client is constructed by
+`SupabaseClientFactory` with backend-appropriate auth options
+(`persistSession: false`, `autoRefreshToken: false`,
+`detectSessionInUrl: false` — no browser session storage, no background
+refresh timer, no URL-based session detection) and using the project's
+**publishable key only**, never a service-role key. A fresh client is
+created for every context — clients are never cached or reused across
+runs or projects.
+
+**Signin credentials remain in each `signin` step**, not centralized at
+the project or workflow level (this was decided and implemented in an
+earlier task — see "Workflow Steps API" and "Shared validation package"
+above for the `signin` configuration schema). All executors invoked
+within one workflow run share the same context, and therefore the same
+Supabase client: a `signin` step authenticates that shared client
+(`context.supabase.auth.signInWithPassword`), and every later step in
+the same run sees that authenticated state. A later `signin` step is
+allowed and simply re-authenticates the same client as a different
+Supabase user — there is no restriction on multiple `signin` steps in
+one workflow. A `signout` step clears that client's authentication state
+(`context.supabase.auth.signOut`). `wait` performs a non-blocking delay
+(via an injectable `Delay` abstraction, never `setTimeout` called
+directly by the executor) and never touches Supabase.
+
+**The registry currently implements only `signin`, `signout`, and
+`wait`.** `StepExecutorRegistry` discovers every NestJS provider
+decorated with `@WorkflowStepExecutor(type)` during application
+bootstrap (via `@nestjs/core`'s `DiscoveryModule`/`DiscoveryService` and
+`Reflector` — no manually maintained switch statement or executor
+array) and exposes a single `get(type): StepExecutor` lookup. Requesting
+an unimplemented type (`insert`, `read`, `update`, `delete`,
+`invoke_function`) throws `StepExecutorNotFoundError` — these types are
+never silently skipped or substituted. A duplicate registration for the
+same type, or a decorated provider that does not actually implement a
+callable `execute`, fails application bootstrap immediately
+(`DuplicateStepExecutorError` / `InvalidStepExecutorProviderError`), not
+later during an eventual workflow run.
+
+**No run persistence is performed by this task.** Executor results
+(`StepExecutionResult.output`) are JSON-safe and shaped to be *safe to
+persist later* in `step_runs.output`, but nothing in this module writes
+to `workflow_runs` or `step_runs` — that belongs to the future workflow
+engine.
+
+**Executor results intentionally exclude credentials and tokens.**
+`signin` returns only `{ authenticated: true, userId }` — never the
+password, access token, refresh token, or full session. `signout`
+returns only `{ signedOut: true }`. Failures on both become a
+`StepExecutionError` carrying only step identity (`stepId`, `stepKey`,
+`stepType`) and a safe message derived from the SDK's own
+`AuthError.message` (e.g. "Invalid login credentials") — never the
+submitted email/password or any token value. `signOut()` on a client
+with no active session succeeds (`{ error: null }`, confirmed by reading
+the installed SDK's implementation) rather than raising an artificial
+error — this executor never manufactures a failure the SDK itself
+wouldn't report.
+
+**Adding a future built-in executor**: implement `StepExecutor<T>` for
+the new canonical type, decorate the class with
+`@WorkflowStepExecutor('the_type')` and `@Injectable()`, and add it to
+`WorkflowExecutionModule`'s `providers` array — the registry picks it up
+automatically on the next application bootstrap, no other registration
+step is needed. There is no external plugin system; only executors
+compiled into this codebase can be registered.
+
 ## Shared validation package
 
 `packages/validation` (`@supabase-heartbeat/validation`) is a separate
@@ -768,9 +859,11 @@ different `signin` steps (even within the same workflow) may
 authenticate as different Supabase users. This API does **not**
 encrypt, hash, or mask these credentials, and does not currently return
 a redacted value — reading a `signin` step back (via list/read/detail
-endpoints) returns the stored `email`/`password` unchanged. Workflow
-execution itself (actually calling Supabase with these credentials) is
-still not implemented; this schema only validates the step's shape.
+endpoints) returns the stored `email`/`password` unchanged. The internal
+`signin` executor (see "Workflow execution foundation" below) can call
+Supabase with these credentials, but there is no orchestration loop, run
+persistence, or HTTP/scheduler trigger that actually invokes it yet —
+workflow execution is not reachable by a user of this API.
 
 **OpenAPI documentation of step configuration shapes**: `configuration`
 is not documented as a generic object. Each of the 8 step types has a

@@ -303,4 +303,17 @@ describe('API documentation (e2e)', () => {
         .expect('Content-Type', /html/);
     });
   });
+
+  it('exposes no workflow-execution route: WorkflowExecutionModule adds no controller yet', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/openapi.json')
+      .expect(200);
+    const document = response.body as OpenAPIDocument;
+    const pathKeys = Object.keys(document.paths);
+
+    const executionRelatedPaths = pathKeys.filter((path) =>
+      /execut|\/run(s)?(\/|$)/i.test(path),
+    );
+    expect(executionRelatedPaths).toEqual([]);
+  });
 });

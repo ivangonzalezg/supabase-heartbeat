@@ -30,6 +30,7 @@
     "@scalar/api-reference": "1.64.0",
     "@scalar/express-api-reference": "0.10.12",
     "@supabase-heartbeat/validation": "workspace:*",
+    "@supabase/supabase-js": "^2.111.0",
     "@thallesp/nestjs-better-auth": "2.7.0",
     "better-auth": "1.6.25",
     "better-sqlite3": "13.0.2",
