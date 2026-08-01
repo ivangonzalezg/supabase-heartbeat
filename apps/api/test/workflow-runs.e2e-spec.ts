@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { AuthService } from '@thallesp/nestjs-better-auth';
+import type { WorkflowStepType } from '@supabase-heartbeat/validation';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
@@ -13,6 +14,7 @@ import type { Auth } from './../src/modules/auth/auth.config';
 import type { ApplicationRole } from './../src/modules/auth/auth.types';
 import { SupabaseClientFactory } from './../src/modules/workflow-execution/context/supabase-client.factory';
 import { StepExecutorRegistry } from './../src/modules/workflow-execution/registry/step-executor.registry';
+import { StepExecutorNotFoundError } from './../src/modules/workflow-execution/errors/workflow-execution.errors';
 
 interface OpenAPIDocument {
   paths: Record<string, Record<string, unknown>>;
@@ -59,15 +61,76 @@ interface WorkflowRunResponseBody {
 const TEST_PASSWORD = 'correct-horse-battery-staple';
 
 /**
- * A stub Supabase client with the exact `auth.signInWithPassword`/
- * `auth.signOut` surface the `signin`/`signout` executors call, mocking
- * the `RequestResultSafeDestructure`-shaped responses the real SDK
- * returns (see the workflow-execution foundation's own inspection
- * notes). Both methods are `jest.fn()`s so tests can assert every
- * executor received the exact same instance across one run, and can
- * make signin succeed or fail per test.
+ * Canned `{ data, error }` responses used by the `.from()` chain builder
+ * below — one per table operation. Defaults model a realistic
+ * successful call for each of `insert`/`read`/`update`/`delete`; tests
+ * override individual entries to simulate a PostgREST error or a
+ * malformed response for a specific operation.
  */
-function buildMockSupabaseClient(options: { signinShouldSucceed: boolean }) {
+function buildDefaultTableResponses(): Record<
+  'insert' | 'read' | 'update' | 'delete',
+  { data: unknown; error: unknown }
+> {
+  return {
+    insert: {
+      data: [{ id: 'inserted-row-id', name: 'Heartbeat' }],
+      error: null,
+    },
+    read: { data: [], error: null },
+    update: { data: [], error: null },
+    delete: { data: [], error: null },
+  };
+}
+
+/**
+ * A mock client whose chained query builders accurately model the real
+ * SDK surface this task's executors call:
+ * `from().insert().select()`, `from().select().limit()`,
+ * `from().update().eq().select()`, `from().delete().eq().select()`,
+ * `functions.invoke()`, `auth.signInWithPassword()`, `auth.signOut()`.
+ * Every leaf method is a `jest.fn()` so tests can assert exact call
+ * counts/arguments and confirm the same client instance is reused
+ * across every executor in one run.
+ */
+function buildMockSupabaseClient(options: {
+  signinShouldSucceed: boolean;
+  tableResponses?: Partial<ReturnType<typeof buildDefaultTableResponses>>;
+  functionResponse?: { data: unknown; error: unknown };
+}) {
+  const responses = {
+    ...buildDefaultTableResponses(),
+    ...options.tableResponses,
+  };
+
+  const insertSelect = jest.fn(() => Promise.resolve(responses.insert));
+  const insertMock = jest.fn(() => ({ select: insertSelect }));
+
+  const readLimit = jest.fn(() => Promise.resolve(responses.read));
+  const readSelect = jest.fn(() => ({
+    then: (resolve: (value: typeof responses.read) => void) =>
+      resolve(responses.read),
+    limit: readLimit,
+  }));
+
+  const updateSelect = jest.fn(() => Promise.resolve(responses.update));
+  const updateEq = jest.fn(() => ({ select: updateSelect }));
+  const updateMock = jest.fn(() => ({ eq: updateEq }));
+
+  const deleteSelect = jest.fn(() => Promise.resolve(responses.delete));
+  const deleteEq = jest.fn(() => ({ select: deleteSelect }));
+  const deleteMock = jest.fn(() => ({ eq: deleteEq }));
+
+  const from = jest.fn(() => ({
+    insert: insertMock,
+    select: readSelect,
+    update: updateMock,
+    delete: deleteMock,
+  }));
+
+  const invoke = jest.fn(() =>
+    Promise.resolve(options.functionResponse ?? { data: null, error: null }),
+  );
+
   return {
     auth: {
       signInWithPassword: jest.fn(() =>
@@ -85,6 +148,22 @@ function buildMockSupabaseClient(options: { signinShouldSucceed: boolean }) {
             }),
       ),
       signOut: jest.fn(() => Promise.resolve({ error: null })),
+    },
+    from,
+    functions: { invoke },
+    __mocks: {
+      from,
+      insertMock,
+      insertSelect,
+      readSelect,
+      readLimit,
+      updateMock,
+      updateEq,
+      updateSelect,
+      deleteMock,
+      deleteEq,
+      deleteSelect,
+      invoke,
     },
   };
 }
@@ -598,7 +677,42 @@ describe('Workflow Runs API (e2e)', () => {
     );
   });
 
-  it('produces a persisted failed run for an unimplemented step type', async () => {
+  it('produces a persisted failed run when a step type has no registered executor', async () => {
+    // All 8 canonical MVP step types now have a real, registered
+    // executor — there is no remaining genuinely-unimplemented type to
+    // exercise this scenario with. This test instead overrides
+    // StepExecutorRegistry itself (exported by WorkflowExecutionModule,
+    // same override pattern as SupabaseClientFactory above) with a fake
+    // that reports every type as missing, to prove the manual-run engine
+    // still handles a missing-executor failure safely end to end.
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(SupabaseClientFactory)
+      .useValue({ create: () => mockClient })
+      .overrideProvider(StepExecutorRegistry)
+      .useValue({
+        get: (type: WorkflowStepType) => {
+          throw new StepExecutorNotFoundError(type);
+        },
+      })
+      .compile();
+    await app.close();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
+    await setupSwagger(app);
+    await app.init();
+    migrate(app.get(DatabaseService).db, {
+      migrationsFolder: join(process.cwd(), 'drizzle'),
+    });
+
     const admin = await createAndSignIn(
       app,
       `admin-${crypto.randomUUID()}@example.com`,
@@ -606,7 +720,7 @@ describe('Workflow Runs API (e2e)', () => {
     );
     const projectId = await createProjectAs(app, admin);
     const workflow = await createWorkflowAs(app, admin, projectId, {
-      name: 'Unimplemented type',
+      name: 'Missing executor',
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       steps: [
@@ -708,5 +822,620 @@ describe('Workflow Runs API (e2e)', () => {
       /schedule|cron-trigger|scheduler/i.test(path),
     );
     expect(schedulerLikePaths).toEqual([]);
+  });
+
+  describe('data and function executors', () => {
+    function allEightStepsWorkflow() {
+      return {
+        name: 'All MVP step types',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'a-signin',
+            type: 'signin',
+            configuration: { email: 'a@example.com', password: TEST_PASSWORD },
+          },
+          {
+            stepKey: 'b-insert',
+            type: 'insert',
+            configuration: {
+              table: 'heartbeats',
+              values: { name: 'Heartbeat' },
+            },
+          },
+          {
+            stepKey: 'c-read',
+            type: 'read',
+            configuration: { table: 'heartbeats', columns: '*' },
+          },
+          {
+            stepKey: 'd-update',
+            type: 'update',
+            configuration: {
+              table: 'heartbeats',
+              values: { active: false },
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: 'inserted-row-id',
+              },
+            },
+          },
+          {
+            stepKey: 'e-delete',
+            type: 'delete',
+            configuration: {
+              table: 'heartbeats',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: 'inserted-row-id',
+              },
+            },
+          },
+          {
+            stepKey: 'f-invoke',
+            type: 'invoke_function',
+            configuration: { functionName: 'send-heartbeat' },
+          },
+          { stepKey: 'g-wait', type: 'wait', configuration: { seconds: 1 } },
+          { stepKey: 'h-signout', type: 'signout', configuration: {} },
+        ],
+      };
+    }
+
+    it('runs a workflow containing all 8 MVP step types, returning 201 with a successful ordered run', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        allEightStepsWorkflow(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('success');
+      expect(body.stepRuns).toHaveLength(8);
+      expect(body.stepRuns.map((stepRun) => stepRun.status)).toEqual(
+        Array(8).fill('success'),
+      );
+      expect(body.stepRuns.map((stepRun) => stepRun.position)).toEqual([
+        0, 1, 2, 3, 4, 5, 6, 7,
+      ]);
+    });
+
+    it('uses the same mocked client for every data/function operation in the run', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        allEightStepsWorkflow(),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const mocks = mockClient.__mocks;
+      expect(mockClient.auth.signInWithPassword).toHaveBeenCalledTimes(1);
+      expect(mocks.insertMock).toHaveBeenCalledTimes(1);
+      expect(mocks.readSelect).toHaveBeenCalledTimes(1);
+      expect(mocks.updateMock).toHaveBeenCalledTimes(1);
+      expect(mocks.deleteMock).toHaveBeenCalledTimes(1);
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+      expect(mockClient.auth.signOut).toHaveBeenCalledTimes(1);
+      // Every one of these calls happened on the exact same `from`
+      // instance — proving one shared client/context for the whole run.
+      expect(mocks.from).toHaveBeenCalledTimes(4);
+    });
+
+    it('produces a stable insert output shape', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Insert only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'insert-row',
+            type: 'insert',
+            configuration: {
+              table: 'heartbeats',
+              values: { name: 'Heartbeat' },
+            },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.stepRuns[0].output).toEqual({
+        rows: [{ id: 'inserted-row-id', name: 'Heartbeat' }],
+        count: 1,
+      });
+    });
+
+    it('succeeds with an empty read result', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Read only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'read-rows',
+            type: 'read',
+            configuration: { table: 'heartbeats', columns: '*' },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('success');
+      expect(body.stepRuns[0].output).toEqual({ rows: [], count: 0 });
+    });
+
+    it('produces a stable update output shape', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Update only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'update-row',
+            type: 'update',
+            configuration: {
+              table: 'heartbeats',
+              values: { active: false },
+              filter: { column: 'id', operator: 'eq', value: '1' },
+            },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('success');
+      expect(body.stepRuns[0].output).toEqual({ rows: [], count: 0 });
+    });
+
+    it('produces a stable delete output shape', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Delete only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'delete-row',
+            type: 'delete',
+            configuration: {
+              table: 'heartbeats',
+              filter: { column: 'id', operator: 'eq', value: '1' },
+            },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('success');
+      expect(body.stepRuns[0].output).toEqual({ rows: [], count: 0 });
+    });
+
+    it('succeeds with a null function result', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Invoke only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'invoke-fn',
+            type: 'invoke_function',
+            configuration: { functionName: 'send-heartbeat' },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('success');
+      expect(body.stepRuns[0].output).toEqual({ data: null });
+    });
+
+    it('returns outputs through the HTTP response that match what was persisted', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Insert only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'insert-row',
+            type: 'insert',
+            configuration: {
+              table: 'heartbeats',
+              values: { name: 'Heartbeat' },
+            },
+          },
+        ],
+      });
+
+      const runResponse = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+      const body = runResponse.body as WorkflowRunResponseBody;
+
+      const stepResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectId}/workflows/${workflow.id}/steps`)
+        .set('Cookie', admin.cookie)
+        .expect(200);
+      const steps = stepResponse.body as { id: string }[];
+
+      expect(body.stepRuns[0].output).toEqual({
+        rows: [{ id: 'inserted-row-id', name: 'Heartbeat' }],
+        count: 1,
+      });
+      expect(steps).toHaveLength(1);
+    });
+
+    it('returns 201 with a failed run when a PostgREST-style error occurs, and stops before later steps', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: {
+          insert: {
+            data: null,
+            error: {
+              message: 'permission denied',
+              details: '',
+              hint: '',
+              code: '42501',
+            },
+          },
+        },
+      });
+
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Insert then read',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'insert-row',
+            type: 'insert',
+            configuration: {
+              table: 'heartbeats',
+              values: { name: 'Heartbeat' },
+            },
+          },
+          {
+            stepKey: 'read-rows',
+            type: 'read',
+            configuration: { table: 'heartbeats', columns: '*' },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('failed');
+      expect(body.stepRuns).toHaveLength(1);
+      expect(body.stepRuns[0].status).toBe('failed');
+      expect(mockClient.__mocks.readSelect).not.toHaveBeenCalled();
+    });
+
+    it('produces a safe failed run for a Functions SDK error', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        functionResponse: {
+          data: null,
+          error: {
+            name: 'FunctionsHttpError',
+            message: 'Edge Function returned a non-2xx status code',
+          },
+        },
+      });
+
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Invoke only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'invoke-fn',
+            type: 'invoke_function',
+            configuration: { functionName: 'send-heartbeat' },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('failed');
+      expect(body.stepRuns[0].status).toBe('failed');
+      expect(body.stepRuns[0].error).toContain('function invocation failed');
+    });
+
+    it('produces a safe failed run for a non-JSON-safe executor result', async () => {
+      class FakeBlob {
+        size = 0;
+      }
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        functionResponse: { data: new FakeBlob(), error: null },
+      });
+
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Invoke only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'invoke-fn',
+            type: 'invoke_function',
+            configuration: { functionName: 'send-heartbeat' },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('failed');
+      expect(body.stepRuns[0].status).toBe('failed');
+      expect(body.stepRuns[0].error).toContain('cannot be stored as JSON');
+    });
+
+    it('never exposes a filter value, function body, or raw SDK error in the response', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: {
+          update: {
+            data: null,
+            error: {
+              message: 'row violates policy',
+              details: 'Key (id)=(super-secret-filter-value) conflicts.',
+              hint: '',
+              code: '42501',
+            },
+          },
+        },
+      });
+
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Update only',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'update-row',
+            type: 'update',
+            configuration: {
+              table: 'heartbeats',
+              values: { active: false },
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: 'super-secret-filter-value',
+              },
+            },
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      // The filter value legitimately appears in `inputSnapshot` (the
+      // step's own persisted configuration, redacted only for
+      // `signin.password` — see `execution-snapshot.ts`). What must never
+      // leak is the raw PostgREST error text, and the filter value must
+      // never appear inside the *error* fields specifically, which are
+      // built entirely from step identity and a fixed sentence.
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.error).not.toContain('super-secret-filter-value');
+      expect(body.error).not.toContain('row violates policy');
+      expect(body.error).not.toContain('conflicts');
+      expect(body.stepRuns[0].error).not.toContain('super-secret-filter-value');
+      expect(body.stepRuns[0].error).not.toContain('row violates policy');
+      expect(body.stepRuns[0].error).not.toContain('conflicts');
+    });
   });
 });

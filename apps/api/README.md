@@ -22,8 +22,8 @@ Currently implemented:
 * A Workflows API (`/api/projects/:projectId/workflows`), nested under
   Projects, with the same ownership model — see "Workflows API" below.
   Workflows are created together with their complete ordered step list in
-  one transactional request; scheduling and execution are not implemented
-  yet.
+  one transactional request; scheduling (cron-triggered execution) is not
+  implemented yet.
 * A Workflow Steps API
   (`/api/projects/:projectId/workflows/:workflowId/steps`), nested under
   Workflows, for managing steps after creation, including a complete-order
@@ -37,27 +37,34 @@ Currently implemented:
 * An internal workflow-execution foundation
   (`src/modules/workflow-execution/`) — a `StepExecutor` contract, a
   NestJS-discovery-based executor registry, a per-run Supabase client
-  factory/execution context, and working `signin`/`signout`/`wait`
-  executors. This is architecture only: there is no orchestration loop,
-  no `workflow_runs`/`step_runs` persistence, and no HTTP endpoint or
-  scheduler that actually runs a workflow yet — see "Workflow execution
-  foundation" below.
+  factory/execution context, and a working executor for every one of the
+  8 current MVP step types (`signin`, `signout`, `wait`, `insert`,
+  `read`, `update`, `delete`, `invoke_function`) — see "Workflow
+  execution foundation" below.
+* A manual workflow-run orchestration engine and endpoint
+  (`POST /api/projects/:projectId/workflows/:workflowId/runs`,
+  `src/modules/workflows/runs/`) — synchronous, admin-only execution of
+  a workflow's enabled steps in order, with `workflow_runs`/`step_runs`
+  persistence — see "Workflow Runs API" below.
 * A development proxy that forwards non-API requests to the Vite dev
   server, so the browser only ever talks to this API.
 * Production static hosting of the compiled frontend, with an SPA fallback.
 
 **Planned / not yet implemented:**
 
-* The workflow-run orchestration loop, `workflow_runs`/`step_runs`
-  persistence, a manual-run HTTP endpoint, scheduler integration, and
-  `insert`/`read`/`update`/`delete`/`invoke_function` executors —
-  output-reference resolution between steps, retries, cancellation, and
-  timeout policy all depend on this and are not implemented either.
+* Scheduler integration and cron-triggered execution.
+* Workflow-run overlap prevention, retries, cancellation, and timeouts.
+* Output-reference resolution between steps (`${steps...}` syntax) and
+  interpolation — the current output contracts (`{ rows, count }` /
+  `{ data }`) are intentionally designed to support this later.
+* Run-history read endpoints (`GET` list/detail for past runs).
+* Remote-operation compensation/rollback — a later step's failure never
+  reverses an earlier step's already-committed Supabase side effects.
 * Project sharing / multi-user access to the same project.
 * Frontend administration UI for creating additional users.
 * Business logic beyond the health check, authentication foundation,
-  Projects API, Workflows API, Workflow Steps API, and the
-  workflow-execution foundation.
+  Projects API, Workflows API, Workflow Steps API, the
+  workflow-execution foundation, and manual workflow runs.
 
 ## Current stack
 
@@ -753,19 +760,21 @@ one workflow. A `signout` step clears that client's authentication state
 (via an injectable `Delay` abstraction, never `setTimeout` called
 directly by the executor) and never touches Supabase.
 
-**The registry currently implements only `signin`, `signout`, and
-`wait`.** `StepExecutorRegistry` discovers every NestJS provider
-decorated with `@WorkflowStepExecutor(type)` during application
+**All 8 current MVP step types now have a registered executor:**
+`signin`, `signout`, `wait`, `insert`, `read`, `update`, `delete`,
+`invoke_function`. `StepExecutorRegistry` discovers every NestJS
+provider decorated with `@WorkflowStepExecutor(type)` during application
 bootstrap (via `@nestjs/core`'s `DiscoveryModule`/`DiscoveryService` and
 `Reflector` — no manually maintained switch statement or executor
-array) and exposes a single `get(type): StepExecutor` lookup. Requesting
-an unimplemented type (`insert`, `read`, `update`, `delete`,
-`invoke_function`) throws `StepExecutorNotFoundError` — these types are
-never silently skipped or substituted. A duplicate registration for the
-same type, or a decorated provider that does not actually implement a
-callable `execute`, fails application bootstrap immediately
-(`DuplicateStepExecutorError` / `InvalidStepExecutorProviderError`), not
-later during an eventual workflow run.
+array) and exposes a single `get(type): StepExecutor` lookup. There is
+no remaining canonical type that throws `StepExecutorNotFoundError`
+today; that error remains the registry's behavior for any future
+unimplemented type, and is never silently skipped or substituted. A
+duplicate registration for the same type, or a decorated provider that
+does not actually implement a callable `execute`, fails application
+bootstrap immediately (`DuplicateStepExecutorError` /
+`InvalidStepExecutorProviderError`), not later during an eventual
+workflow run.
 
 **Executor results intentionally exclude credentials and tokens.**
 `signin` returns only `{ authenticated: true, userId }` — never the
@@ -780,13 +789,95 @@ the installed SDK's implementation) rather than raising an artificial
 error — this executor never manufactures a failure the SDK itself
 wouldn't report.
 
+### Data and function executors (`insert`, `read`, `update`, `delete`, `invoke_function`)
+
+All five use `context.supabase` — the same per-run client every other
+executor uses — and never construct a client of their own. Because it
+is the same authenticated client a `signin` step established, **Row
+Level Security is enforced by Supabase exactly as it would be for that
+session**; nothing in these executors bypasses RLS or uses a
+service-role key.
+
+**Stable output contracts**, designed to later become the source for
+cross-step output references (not implemented in this task):
+
+* `insert`, `read`, `update`, `delete` → `{ rows: JsonObject[], count:
+  number }`. `count` is always `rows.length`, never a separately
+  reported count. Zero returned/affected rows is a **valid, successful**
+  result (`{ rows: [], count: 0 }`), never a technical failure.
+* `invoke_function` → `{ data: JsonValue }`. A function that returns no
+  body is valid, successful `{ data: null }` — never coerced to `{}`.
+
+**Table selection behavior**: `insert`/`update`/`delete` always call
+`.select()` after the mutation so the response contains the
+affected row(s) — the shared validation schemas for these three types
+have no `select`/`returning` configuration field of their own to honor
+instead. `read` calls `.select(configuration.columns ?? '*')`, where
+`columns` is already the PostgREST-ready comma-separated string the
+shared schema produces — no array-to-string translation happens here.
+`read.limit` is applied via `.limit()` only when present; no default
+limit is invented when it is absent.
+
+**Filter translation (`update`/`delete`)**: the shared validation
+package's `updateFilterOperators` closed set currently contains exactly
+one operator, `'eq'` (see `packages/validation/src/workflow-steps/
+update.schema.ts`) — broader operators such as `neq`/`gt`/`like` are
+**not yet implemented** in the shared schema and are therefore not
+implemented here either, per this task's "preserve current
+configuration contracts" scope. A single, explicit,
+allowlisted-`switch`-based translator
+(`filters/apply-postgrest-filter.ts`) maps `'eq'` to
+`query.eq(column, value)` — there is no dynamic method lookup
+(`query[operator](...)`), no raw PostgREST filter string, and no
+silent fallback to `eq` for an unrecognized operator. `update.filter`
+and `delete.filter` are both required by the shared schema (not
+optional) — there is no code path in either executor that performs a
+mutation without first applying a filter, so an unfiltered update or
+delete is structurally impossible, not merely avoided by convention.
+
+**JSON-safety validation**: every row returned by
+`insert`/`read`/`update`/`delete` must normalize to a JSON object — a
+primitive row, or a row containing `undefined`, a `bigint`, a symbol, a
+function, a non-finite number (`NaN`/`Infinity`), a cyclic reference, or
+an unsupported class instance fails that step safely with
+`InvalidStepExecutionOutputError` rather than persisting a corrupted or
+partial value. The same check applies to `invoke_function`'s `data`,
+which additionally may be a `Blob`, a raw `Response`, or `FormData`
+depending on the invoked function's `Content-Type` (per the installed
+`@supabase/functions-js` SDK) — none of those are JSON-safe and all are
+rejected the same way. This validator is a narrow, hand-written
+recursive check (`execution-output/normalize-step-output.ts`), not
+`JSON.stringify`/`JSON.parse`.
+
+**Supabase/PostgREST/Functions error handling**: an SDK-reported
+`{ error }` on a table operation, or a thrown exception during the
+request, becomes a `StepExecutionError` with a **fixed,
+operation-specific message** (e.g. "Supabase rejected the insert
+operation.") — never the PostgREST error's own `message`/`details`/
+`hint` text, since the installed SDK's own `PostgrestError` source
+documents that `details`/`hint` "often" carry the offending value, key,
+or row. `invoke_function` failures (`FunctionsHttpError`/
+`FunctionsRelayError`/`FunctionsFetchError`, or a thrown network
+exception) become a single fixed message, "Supabase function invocation
+failed." — these error classes' own `context` can be the raw `Response`
+object, so no part of it is ever read. The original error is preserved
+only as the standard `Error` `cause`, for internal diagnosis, never
+persisted or returned.
+
 **Adding a future built-in executor**: implement `StepExecutor<T>` for
 the new canonical type, decorate the class with
-`@WorkflowStepExecutor('the_type')` and `@Injectable()`, and add it to
-`WorkflowExecutionModule`'s `providers` array — the registry picks it up
-automatically on the next application bootstrap, no other registration
-step is needed. There is no external plugin system; only executors
-compiled into this codebase can be registered.
+`@WorkflowStepExecutor('the_type')` and `@Injectable()`, add it to
+`WorkflowExecutionModule`'s `providers` array, and add its configuration
+type to `ConfigurationForStepType` in `contracts/step-executor.ts` — the
+registry picks up the new executor automatically on the next
+application bootstrap, and a compile-time exhaustiveness check
+(`ConfigurationForStepTypeIsExhaustive`) fails the build if the mapped
+type is forgotten. There is no external plugin system; only executors
+compiled into this codebase can be registered. A future executor should
+always: use `context.supabase` (never construct its own client); return
+a stable, JSON-safe output; wrap every expected failure as a safe
+`StepExecutionError`; and never expose a raw SDK error, response
+headers, or authentication material in a persisted or returned message.
 
 ## Workflow Runs API
 
@@ -880,20 +971,41 @@ password, access token, or session). **Error serialization** uses an
 explicit allowlist, not a blanket pass-through: only errors of a
 recognized, individually audited internal type — `StepExecutionError`
 (persisted as its own safe `.message` verbatim), `StepExecutorNotFoundError`,
-and `InvalidPersistedStepConfigurationError` — ever have their
-`.message` read at all. Every other thrown value — an unrecognized
-`Error` subclass, a plain `Error` from an unanticipated SDK exception,
-or a non-Error thrown value — is reduced to a fixed, generic sentence,
-`Step "<key>" (<type>) failed: An unexpected execution error occurred.`
-(or `Workflow run failed: An unexpected execution error occurred.` for
-the run-level summary), because an arbitrary error's message, stack,
-enumerable properties, or `cause` chain could otherwise carry a
-credential, token, or request payload straight into persisted/returned
-data. The three built-in executors (`signin`, `signout`, `wait`)
-already wrap their own failures into a safe `StepExecutionError` before
-they ever reach this layer — the allowlist is defense-in-depth for a
-future or third-party executor that does not (see
-`execution-error-serializer.ts`).
+`InvalidPersistedStepConfigurationError`, `InvalidStepExecutionOutputError`
+(a data/function executor produced output that cannot be stored as
+JSON), and `UnsupportedPersistedFilterOperatorError` (a persisted
+`update`/`delete` filter uses an operator outside the shared schema's
+current closed set) — ever have their `.message` read at all. Every
+other thrown value — an unrecognized `Error` subclass, a plain `Error`
+from an unanticipated SDK exception, or a non-Error thrown value — is
+reduced to a fixed, generic sentence, `Step "<key>" (<type>) failed: An
+unexpected execution error occurred.` (or `Workflow run failed: An
+unexpected execution error occurred.` for the run-level summary),
+because an arbitrary error's message, stack, enumerable properties, or
+`cause` chain could otherwise carry a credential, token, or request
+payload straight into persisted/returned data. Every built-in executor
+already wraps its own failures into a safe `StepExecutionError` (or one
+of the two output/filter errors above) before they ever reach this
+layer — the allowlist is defense-in-depth for a future or third-party
+executor that does not (see `execution-error-serializer.ts`).
+
+**Remote side effects and rollback semantics.** A `insert`/`update`/
+`delete`/`invoke_function` step that succeeds has already committed its
+effect on the remote Supabase project — an `insert` really created a
+row, an `update`/`delete` really changed rows, a function invocation
+really ran. **If a later step in the same run then fails, none of these
+already-committed remote effects are reversed.** SQLite persistence in
+`workflow_runs`/`step_runs` records what happened; it is not a
+distributed transaction spanning the local database and the remote
+Supabase project, and this task does not implement any compensation or
+automatic rollback logic. A workflow that needs cleanup after a
+partial failure should include explicit cleanup steps (e.g. a `delete`
+step targeting rows an earlier `insert` step created) — output
+references between steps (needed to target "the row the earlier step
+just created" precisely) are not implemented yet, so such cleanup
+workflows are only partially practical today; this is one of the
+motivations for the stable `{ rows, count }` / `{ data }` output
+contracts already in place.
 
 **Not implemented by this endpoint**: overlap prevention (nothing stops
 two concurrent manual runs of the same workflow), distributed locks,

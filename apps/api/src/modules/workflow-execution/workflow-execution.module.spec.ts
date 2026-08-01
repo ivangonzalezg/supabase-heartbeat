@@ -1,8 +1,19 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import type { WorkflowStepType } from '@supabase-heartbeat/validation';
 import { WorkflowExecutionContextFactory } from './context/workflow-execution-context.factory';
-import { StepExecutorNotFoundError } from './errors/workflow-execution.errors';
 import { StepExecutorRegistry } from './registry/step-executor.registry';
 import { WorkflowExecutionModule } from './workflow-execution.module';
+
+const ALL_MVP_STEP_TYPES: readonly WorkflowStepType[] = [
+  'signin',
+  'signout',
+  'wait',
+  'insert',
+  'read',
+  'update',
+  'delete',
+  'invoke_function',
+];
 
 /**
  * Integration tests proving `WorkflowExecutionModule` bootstraps
@@ -32,33 +43,28 @@ describe('WorkflowExecutionModule (integration)', () => {
     expect(moduleRef).toBeDefined();
   });
 
-  it('registers exactly the three implemented executor types', () => {
+  it('registers exactly the 8 canonical MVP executor types', () => {
     const registry = moduleRef.get(StepExecutorRegistry);
 
-    expect(registry.get('signin')).toBeDefined();
-    expect(registry.get('signout')).toBeDefined();
-    expect(registry.get('wait')).toBeDefined();
+    for (const type of ALL_MVP_STEP_TYPES) {
+      expect(registry.get(type)).toBeDefined();
+    }
   });
 
   it('resolves each registered executor with its own matching type', () => {
     const registry = moduleRef.get(StepExecutorRegistry);
 
-    expect(registry.get('signin').type).toBe('signin');
-    expect(registry.get('signout').type).toBe('signout');
-    expect(registry.get('wait').type).toBe('wait');
+    for (const type of ALL_MVP_STEP_TYPES) {
+      expect(registry.get(type).type).toBe(type);
+    }
   });
 
-  it('throws the focused missing-executor error for every unimplemented type', () => {
+  it('produces a working, callable executor for every canonical MVP type — no lookup fails as missing', () => {
     const registry = moduleRef.get(StepExecutorRegistry);
 
-    for (const type of [
-      'insert',
-      'read',
-      'update',
-      'delete',
-      'invoke_function',
-    ] as const) {
-      expect(() => registry.get(type)).toThrow(StepExecutorNotFoundError);
+    for (const type of ALL_MVP_STEP_TYPES) {
+      expect(() => registry.get(type)).not.toThrow();
+      expect(typeof registry.get(type).execute).toBe('function');
     }
   });
 
@@ -79,5 +85,18 @@ describe('WorkflowExecutionModule (integration)', () => {
     });
 
     expect(first.supabase).not.toBe(second.supabase);
+  });
+
+  it('introduces no controller or public HTTP route', () => {
+    const app = moduleRef.createNestApplication();
+    const httpAdapter = app.getHttpAdapter();
+    const instance = httpAdapter.getInstance() as {
+      _router?: { stack?: unknown[] };
+    };
+
+    // Express only builds a `_router` once a route/middleware has been
+    // registered; `WorkflowExecutionModule` declares no `@Controller`, so
+    // no router stack should exist from this module alone.
+    expect(instance._router?.stack ?? []).toHaveLength(0);
   });
 });

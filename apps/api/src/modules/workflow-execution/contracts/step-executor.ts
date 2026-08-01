@@ -2,6 +2,11 @@ import type {
   SigninConfiguration,
   SignoutConfiguration,
   WaitConfiguration,
+  InsertConfiguration,
+  ReadConfiguration,
+  UpdateConfiguration,
+  DeleteConfiguration,
+  InvokeFunctionConfiguration,
   WorkflowStepType,
 } from '@supabase-heartbeat/validation';
 import type { StepExecutionResult } from './step-execution-result';
@@ -9,14 +14,16 @@ import type { WorkflowExecutionContext } from './workflow-execution-context';
 
 /**
  * Maps each canonical workflow-step type to its validated configuration
- * type from the shared validation package. Types without an executor yet
- * (`insert`, `read`, `update`, `delete`, `invoke_function`) map to an
- * empty object shape — no executor in this task ever receives one.
+ * type from the shared validation package. Every one of the 8 current
+ * MVP types (`signin`, `signout`, `wait`, `insert`, `read`, `update`,
+ * `delete`, `invoke_function`) now has a registered executor and a
+ * corresponding branch here — no broad fallback remains for an
+ * implemented canonical type.
  *
  * Defined locally rather than in `@supabase-heartbeat/validation`: that
  * package exports each configuration type individually and has no
- * mapped-type API yet; inventing one there ahead of the other five
- * executors existing would be speculative.
+ * mapped-type API of its own; a mapped type is an execution-layer
+ * concern, not a validation concern.
  */
 export type ConfigurationForStepType<T extends WorkflowStepType> =
   T extends 'signin'
@@ -25,7 +32,37 @@ export type ConfigurationForStepType<T extends WorkflowStepType> =
       ? SignoutConfiguration
       : T extends 'wait'
         ? WaitConfiguration
-        : Record<string, never>;
+        : T extends 'insert'
+          ? InsertConfiguration
+          : T extends 'read'
+            ? ReadConfiguration
+            : T extends 'update'
+              ? UpdateConfiguration
+              : T extends 'delete'
+                ? DeleteConfiguration
+                : T extends 'invoke_function'
+                  ? InvokeFunctionConfiguration
+                  : never;
+
+/**
+ * Compile-time exhaustiveness check: if `WorkflowStepType` ever gains a
+ * new canonical value without a corresponding branch above,
+ * `ConfigurationForStepType<NewType>` resolves to `never`, which makes
+ * this mapped type resolve to a non-`never` union containing that type's
+ * literal name — failing the `AssertExhaustive<never>` constraint below
+ * and breaking the build until a new branch is added. Exported (not
+ * merely declared) so ESLint's `no-unused-vars` treats its declaration
+ * as used and so a unit test can assert its own type resolves to
+ * `never` today (see `step-executor.spec.ts`).
+ */
+type AssertExhaustive<T extends never> = T;
+export type ConfigurationForStepTypeIsExhaustive = AssertExhaustive<
+  {
+    [K in WorkflowStepType]: ConfigurationForStepType<K> extends never
+      ? K
+      : never;
+  }[WorkflowStepType]
+>;
 
 /**
  * The minimal, execution-only view of a persisted workflow step. Carries

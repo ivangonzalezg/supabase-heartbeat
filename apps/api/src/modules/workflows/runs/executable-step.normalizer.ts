@@ -52,5 +52,5 @@ export function toExecutableWorkflowStep(
     type: parsed.data.type,
     position: row.position,
     configuration: parsed.data.configuration,
-  } as ExecutableWorkflowStep<WorkflowStep['type']>;
+  };
 }

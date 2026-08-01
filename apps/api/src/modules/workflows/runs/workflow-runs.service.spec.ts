@@ -156,6 +156,20 @@ function buildSuccessExecutor(
   };
 }
 
+/** Like `buildSuccessExecutor`, but invokes `onExecute` (e.g. to record
+ * call order) before resolving with the given output. */
+function buildTrackedExecutor(
+  type: WorkflowStepType,
+  output: Record<string, unknown>,
+  onExecute: () => void,
+): StepExecutor {
+  const execute = jest.fn((): Promise<{ output: Record<string, unknown> }> => {
+    onExecute();
+    return Promise.resolve({ output });
+  });
+  return { type, execute } as unknown as StepExecutor;
+}
+
 function buildFailingExecutor(type: WorkflowStepType): StepExecutor {
   return {
     type,
@@ -908,6 +922,522 @@ describe('WorkflowRunsService', () => {
 
       expect(result.stepRuns[0].error).not.toContain('super-secret-value');
       expect(result.error).not.toContain('super-secret-value');
+    });
+  });
+
+  describe('data and function executors integration', () => {
+    it('executes signin → insert → read → update → delete → invoke_function → signout in order', async () => {
+      const executionOrder: WorkflowStepType[] = [];
+      const track = (type: WorkflowStepType) => () => executionOrder.push(type);
+
+      registry.register(
+        'signin',
+        buildTrackedExecutor(
+          'signin',
+          { authenticated: true, userId: 'u1' },
+          track('signin'),
+        ),
+      );
+      registry.register(
+        'insert',
+        buildTrackedExecutor(
+          'insert',
+          { rows: [{ id: '1' }], count: 1 },
+          track('insert'),
+        ),
+      );
+      registry.register(
+        'read',
+        buildTrackedExecutor('read', { rows: [], count: 0 }, track('read')),
+      );
+      registry.register(
+        'update',
+        buildTrackedExecutor('update', { rows: [], count: 0 }, track('update')),
+      );
+      registry.register(
+        'delete',
+        buildTrackedExecutor('delete', { rows: [], count: 0 }, track('delete')),
+      );
+      registry.register(
+        'invoke_function',
+        buildTrackedExecutor(
+          'invoke_function',
+          { data: null },
+          track('invoke_function'),
+        ),
+      );
+      registry.register(
+        'signout',
+        buildTrackedExecutor('signout', { signedOut: true }, track('signout')),
+      );
+
+      await createStep(db, workflowA.id, {
+        stepKey: 'a-signin',
+        type: 'signin',
+        position: 0,
+        configuration: { email: 'a@example.com', password: 'x' },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'b-insert',
+        type: 'insert',
+        position: 1,
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'c-read',
+        type: 'read',
+        position: 2,
+        configuration: { table: 't', columns: '*' },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'd-update',
+        type: 'update',
+        position: 3,
+        configuration: {
+          table: 't',
+          values: { name: 'y' },
+          filter: { column: 'id', operator: 'eq', value: '1' },
+        },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'e-delete',
+        type: 'delete',
+        position: 4,
+        configuration: {
+          table: 't',
+          filter: { column: 'id', operator: 'eq', value: '1' },
+        },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'f-invoke',
+        type: 'invoke_function',
+        position: 5,
+        configuration: { functionName: 'my-fn' },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'g-signout',
+        type: 'signout',
+        position: 6,
+        configuration: {},
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('success');
+      expect(executionOrder).toEqual([
+        'signin',
+        'insert',
+        'read',
+        'update',
+        'delete',
+        'invoke_function',
+        'signout',
+      ]);
+    });
+
+    it('gives all executors in the run the same context/client', async () => {
+      const seenContexts: WorkflowExecutionContext[] = [];
+      const trackingExecute = jest.fn(
+        (
+          context: WorkflowExecutionContext,
+        ): Promise<{ output: Record<string, unknown> }> => {
+          seenContexts.push(context);
+          return Promise.resolve({ output: { rows: [], count: 0 } });
+        },
+      );
+      registry.register('insert', {
+        type: 'insert',
+        execute: trackingExecute,
+      } as unknown as StepExecutor);
+      registry.register('read', {
+        type: 'read',
+        execute: trackingExecute,
+      } as unknown as StepExecutor);
+
+      await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        type: 'insert',
+        position: 0,
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'b',
+        type: 'read',
+        position: 1,
+        configuration: { table: 't', columns: '*' },
+      });
+
+      await service.executeManual(adminAActor, projectA.id, workflowA.id);
+
+      expect(seenContexts).toHaveLength(2);
+      expect(seenContexts[0]).toBe(seenContexts[1]);
+      expect(contextFactory.createdContexts).toHaveLength(1);
+    });
+
+    it('persists insert output with rows and count', async () => {
+      registry.register(
+        'insert',
+        buildSuccessExecutor('insert', {
+          rows: [{ id: 'created-row-id', name: 'Heartbeat' }],
+          count: 1,
+        }),
+      );
+      await createStep(db, workflowA.id, {
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'Heartbeat' } },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.stepRuns[0].output).toEqual({
+        rows: [{ id: 'created-row-id', name: 'Heartbeat' }],
+        count: 1,
+      });
+    });
+
+    it('persists a read empty result as success', async () => {
+      registry.register(
+        'read',
+        buildSuccessExecutor('read', { rows: [], count: 0 }),
+      );
+      await createStep(db, workflowA.id, {
+        type: 'read',
+        configuration: { table: 't', columns: '*' },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('success');
+      expect(result.stepRuns[0].status).toBe('success');
+      expect(result.stepRuns[0].output).toEqual({ rows: [], count: 0 });
+    });
+
+    it('persists an update zero-result as success', async () => {
+      registry.register(
+        'update',
+        buildSuccessExecutor('update', { rows: [], count: 0 }),
+      );
+      await createStep(db, workflowA.id, {
+        type: 'update',
+        configuration: {
+          table: 't',
+          values: { active: false },
+          filter: { column: 'id', operator: 'eq', value: '1' },
+        },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('success');
+      expect(result.stepRuns[0].output).toEqual({ rows: [], count: 0 });
+    });
+
+    it('persists a delete zero-result as success', async () => {
+      registry.register(
+        'delete',
+        buildSuccessExecutor('delete', { rows: [], count: 0 }),
+      );
+      await createStep(db, workflowA.id, {
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: { column: 'id', operator: 'eq', value: '1' },
+        },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('success');
+      expect(result.stepRuns[0].output).toEqual({ rows: [], count: 0 });
+    });
+
+    it('persists a function data: null result as success', async () => {
+      registry.register(
+        'invoke_function',
+        buildSuccessExecutor('invoke_function', { data: null }),
+      );
+      await createStep(db, workflowA.id, {
+        type: 'invoke_function',
+        configuration: { functionName: 'my-fn' },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('success');
+      expect(result.stepRuns[0].output).toEqual({ data: null });
+    });
+
+    it('returns outputs through the response that match what was persisted', async () => {
+      registry.register(
+        'insert',
+        buildSuccessExecutor('insert', { rows: [{ id: '1' }], count: 1 }),
+      );
+      await createStep(db, workflowA.id, {
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      const [persisted] = await db
+        .select()
+        .from(schema.stepRuns)
+        .where(eq(schema.stepRuns.id, result.stepRuns[0].id));
+      expect(result.stepRuns[0].output).toEqual(persisted.output);
+    });
+
+    it('marks the current step failed on an SDK-style error and fails the run', async () => {
+      registry.register('insert', buildFailingExecutor('insert'));
+      await createStep(db, workflowA.id, {
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('failed');
+      expect(result.stepRuns[0].status).toBe('failed');
+    });
+
+    it('does not attempt later steps after a data-executor failure', async () => {
+      registry.register('insert', buildFailingExecutor('insert'));
+      const readExecutor = buildSuccessExecutor('read', { rows: [], count: 0 });
+      registry.register('read', readExecutor);
+
+      await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        type: 'insert',
+        position: 0,
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'b',
+        type: 'read',
+        position: 1,
+        configuration: { table: 't', columns: '*' },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.stepRuns).toHaveLength(1);
+      expect(readExecutor.executeMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps prior successful steps persisted after a later failure', async () => {
+      registry.register(
+        'insert',
+        buildSuccessExecutor('insert', { rows: [{ id: '1' }], count: 1 }),
+      );
+      registry.register('read', buildFailingExecutor('read'));
+
+      await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        type: 'insert',
+        position: 0,
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'b',
+        type: 'read',
+        position: 1,
+        configuration: { table: 't', columns: '*' },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.stepRuns).toHaveLength(2);
+      expect(result.stepRuns[0].status).toBe('success');
+      expect(result.stepRuns[0].output).toEqual({
+        rows: [{ id: '1' }],
+        count: 1,
+      });
+      expect(result.stepRuns[1].status).toBe('failed');
+    });
+
+    it('fails safely when an executor produces an invalid (non-JSON-safe) output', async () => {
+      registry.register('insert', {
+        type: 'insert',
+        execute: jest.fn(() =>
+          Promise.reject(
+            new StepExecutionError({
+              stepId: 'irrelevant',
+              stepKey: 'a',
+              stepType: 'insert',
+              message:
+                'Step "a" (insert) produced an output that cannot be stored as JSON.',
+            }),
+          ),
+        ),
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('failed');
+      expect(result.stepRuns[0].error).toContain('cannot be stored as JSON');
+    });
+
+    it('fails safely for an unsupported/legacy persisted filter operator', async () => {
+      registry.register('update', buildFailingExecutor('update'));
+      await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        type: 'update',
+        // Bypasses the shared schema deliberately: this simulates a
+        // legacy row whose operator predates the current closed set —
+        // parseWorkflowStepConfiguration itself would reject `neq` today,
+        // so the failure is simulated at the executor layer instead of
+        // trying to persist an invalid row through the normal write path.
+        configuration: {
+          table: 't',
+          values: { active: false },
+          filter: { column: 'id', operator: 'eq', value: '1' },
+        },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('failed');
+    });
+
+    it('collapses an unknown thrown error to the hardened generic message', async () => {
+      registry.register('insert', {
+        type: 'insert',
+        execute: jest.fn(() =>
+          Promise.reject(new Error('raw unexpected SDK failure: token=leaked')),
+        ),
+      });
+      await createStep(db, workflowA.id, {
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.stepRuns[0].error).not.toContain('token=leaked');
+      expect(result.stepRuns[0].error).toContain(
+        'An unexpected execution error occurred.',
+      );
+    });
+
+    it('never includes filter values, row values, or a function body in persisted errors', async () => {
+      registry.register('update', {
+        type: 'update',
+        execute: jest.fn(() =>
+          Promise.reject(
+            new Error(
+              'unexpected: filter-value=super-secret-filter row-value=super-secret-row body=super-secret-body',
+            ),
+          ),
+        ),
+      });
+      await createStep(db, workflowA.id, {
+        type: 'update',
+        configuration: {
+          table: 't',
+          values: { name: 'super-secret-row' },
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: 'super-secret-filter',
+          },
+        },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.stepRuns[0].error).not.toContain('super-secret-filter');
+      expect(result.stepRuns[0].error).not.toContain('super-secret-row');
+      expect(result.stepRuns[0].error).not.toContain('super-secret-body');
+      expect(result.error).not.toContain('super-secret-filter');
+    });
+
+    it('produces no missing-executor error for any of the 8 MVP step types when all are registered', async () => {
+      for (const type of [
+        'signin',
+        'signout',
+        'wait',
+        'insert',
+        'read',
+        'update',
+        'delete',
+        'invoke_function',
+      ] as const) {
+        registry.register(type, buildSuccessExecutor(type, { ok: true }));
+      }
+      await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      const result = await service.executeManual(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result.status).toBe('success');
+      expect(result.error).toBeNull();
     });
   });
 

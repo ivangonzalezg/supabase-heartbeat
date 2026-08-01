@@ -7,13 +7,20 @@ import { RealDelay } from './delay/real-delay';
 import { SigninStepExecutor } from './executors/signin-step.executor';
 import { SignoutStepExecutor } from './executors/signout-step.executor';
 import { WaitStepExecutor } from './executors/wait-step.executor';
+import { InsertStepExecutor } from './executors/insert-step.executor';
+import { ReadStepExecutor } from './executors/read-step.executor';
+import { UpdateStepExecutor } from './executors/update-step.executor';
+import { DeleteStepExecutor } from './executors/delete-step.executor';
+import { InvokeFunctionStepExecutor } from './executors/invoke-function-step.executor';
 import { StepExecutorRegistry } from './registry/step-executor.registry';
 
 /**
  * The workflow-execution foundation: the executor registry, the
  * per-execution Supabase client/context factories, the delay
- * abstraction, and the three implemented executors (`signin`, `signout`,
- * `wait`).
+ * abstraction, and all 8 currently implemented executors (`signin`,
+ * `signout`, `wait`, `insert`, `read`, `update`, `delete`,
+ * `invoke_function`) — every canonical MVP `WorkflowStepType` now has a
+ * registered executor.
  *
  * Imports `DiscoveryModule` so `StepExecutorRegistry` can use
  * `DiscoveryService`/`Reflector` to find every `@WorkflowStepExecutor`
@@ -36,6 +43,11 @@ import { StepExecutorRegistry } from './registry/step-executor.registry';
     SigninStepExecutor,
     SignoutStepExecutor,
     WaitStepExecutor,
+    InsertStepExecutor,
+    ReadStepExecutor,
+    UpdateStepExecutor,
+    DeleteStepExecutor,
+    InvokeFunctionStepExecutor,
   ],
   exports: [StepExecutorRegistry, WorkflowExecutionContextFactory],
 })

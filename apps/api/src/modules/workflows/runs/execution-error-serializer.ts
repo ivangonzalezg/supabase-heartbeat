@@ -3,6 +3,8 @@ import {
   StepExecutionError,
   StepExecutorNotFoundError,
 } from '../../workflow-execution/errors/workflow-execution.errors';
+import { InvalidStepExecutionOutputError } from '../../workflow-execution/execution-output/step-execution-output.errors';
+import { UnsupportedPersistedFilterOperatorError } from '../../workflow-execution/filters/unsupported-filter-operator.error';
 import { InvalidPersistedStepConfigurationError } from './executable-step.normalizer';
 
 /**
@@ -26,11 +28,23 @@ const GENERIC_UNEXPECTED_ERROR_MESSAGE =
  * carry a credential, token, or request payload. Every class here has
  * been individually audited (see each class's own doc comment) — this
  * is a closed allowlist, not a heuristic.
+ *
+ * `InvalidStepExecutionOutputError` (data/function executor produced a
+ * value that cannot be stored as JSON) and
+ * `UnsupportedPersistedFilterOperatorError` (a persisted `update`/
+ * `delete` filter operator outside the shared schema's current closed
+ * set) were added for the `insert`/`read`/`update`/`delete`/
+ * `invoke_function` executors: both build their message entirely from
+ * step identity and fixed strings, never from the rejected output value,
+ * the filter's column/value, or any row/request data — confirmed by
+ * reading their constructors before adding them here.
  */
 const SAFE_ERROR_TYPES = [
   StepExecutionError,
   StepExecutorNotFoundError,
   InvalidPersistedStepConfigurationError,
+  InvalidStepExecutionOutputError,
+  UnsupportedPersistedFilterOperatorError,
 ] as const;
 
 function isSafeError(error: unknown): error is Error {
