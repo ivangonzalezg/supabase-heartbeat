@@ -22,7 +22,9 @@ export class UpdateStepConfigurationDto {
   @ApiProperty({
     description:
       'The columns to update, as a nonempty JSON object mapping column ' +
-      'names to new values.',
+      'names to new values. Any value may instead be a whole-value ' +
+      'step-output reference to an earlier, enabled step — see ' +
+      '`InsertStepConfigurationDto.values` for the full reference syntax.',
     example: { status: 'inactive' },
     type: 'object',
     additionalProperties: true,

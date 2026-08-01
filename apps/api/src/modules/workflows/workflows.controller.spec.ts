@@ -77,7 +77,7 @@ describe('WorkflowsController', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'wait-1',
+          stepKey: 'wait_1',
           type: 'wait' as const,
           configuration: { seconds: 5 },
         },

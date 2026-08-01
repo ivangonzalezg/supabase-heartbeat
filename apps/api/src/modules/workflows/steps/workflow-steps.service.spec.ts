@@ -262,7 +262,7 @@ describe('WorkflowStepsService', () => {
     it('appends a step at MAX(position) + 1', async () => {
       await createStep(db, workflowA.id, { stepKey: 'existing', position: 0 });
       await createStep(db, workflowA.id, {
-        stepKey: 'existing-2',
+        stepKey: 'existing_2',
         position: 1,
       });
 
@@ -320,12 +320,58 @@ describe('WorkflowStepsService', () => {
         }),
       ).rejects.toThrow(WorkflowNotFoundError);
     });
+
+    it('appends a step referencing an earlier enabled step', async () => {
+      await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      const step = await service.create(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        {
+          stepKey: 'delete_record',
+          type: 'delete',
+          configuration: {
+            table: 't',
+            filter: {
+              column: 'id',
+              operator: 'eq',
+              value: '${steps.create_record.output.rows.0.id}',
+            },
+          },
+        },
+      );
+
+      expect(step.position).toBe(1);
+    });
+
+    it('rejects appending a step referencing an unknown step', async () => {
+      await expect(
+        service.create(adminAActor, projectA.id, workflowA.id, {
+          stepKey: 'delete_record',
+          type: 'delete',
+          configuration: {
+            table: 't',
+            filter: {
+              column: 'id',
+              operator: 'eq',
+              value: '${steps.unknown_step.output.id}',
+            },
+          },
+        }),
+      ).rejects.toThrow();
+    });
   });
 
   describe('update', () => {
     it('applies a valid partial update', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'wait-step',
+        stepKey: 'wait_step',
         type: 'wait',
         configuration: { seconds: 1 },
       });
@@ -343,7 +389,7 @@ describe('WorkflowStepsService', () => {
 
     it('rejects a merged type+configuration mismatch', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'wait-step',
+        stepKey: 'wait_step',
         type: 'wait',
         configuration: { seconds: 1 },
       });
@@ -357,7 +403,7 @@ describe('WorkflowStepsService', () => {
 
     it('accepts a simultaneous type+configuration change validated as the new pair', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'wait-step',
+        stepKey: 'wait_step',
         type: 'wait',
         configuration: { seconds: 1 },
       });
@@ -376,7 +422,7 @@ describe('WorkflowStepsService', () => {
 
     it('rejects changing another step to signin without valid credentials', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'wait-step',
+        stepKey: 'wait_step',
         type: 'wait',
         configuration: { seconds: 1 },
       });
@@ -390,7 +436,7 @@ describe('WorkflowStepsService', () => {
 
     it('accepts changing another step to signin with valid credentials', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'wait-step',
+        stepKey: 'wait_step',
         type: 'wait',
         configuration: { seconds: 1 },
       });
@@ -418,7 +464,7 @@ describe('WorkflowStepsService', () => {
 
     it('validates the merged signin configuration when only the password changes', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'sign-in',
+        stepKey: 'sign_in',
         type: 'signin',
         configuration: {
           email: 'heartbeat-user@example.com',
@@ -447,7 +493,7 @@ describe('WorkflowStepsService', () => {
 
     it('rejects an update that would leave a signin step with an empty configuration', async () => {
       const step = await createStep(db, workflowA.id, {
-        stepKey: 'sign-in',
+        stepKey: 'sign_in',
         type: 'signin',
         configuration: {
           email: 'heartbeat-user@example.com',
@@ -531,6 +577,231 @@ describe('WorkflowStepsService', () => {
         }),
       ).rejects.toThrow(DuplicateStepKeyError);
     });
+
+    it('adds a valid reference to another enabled earlier step', async () => {
+      await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      const target = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: { column: 'id', operator: 'eq', value: 'literal' },
+        },
+      });
+
+      const updated = await service.update(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        target.id,
+        {
+          configuration: {
+            table: 't',
+            filter: {
+              column: 'id',
+              operator: 'eq',
+              value: '${steps.create_record.output.rows.0.id}',
+            },
+          },
+        },
+      );
+
+      expect(updated.configuration).toEqual({
+        table: 't',
+        filter: {
+          column: 'id',
+          operator: 'eq',
+          value: '${steps.create_record.output.rows.0.id}',
+        },
+      });
+    });
+
+    it('rejects a dangerous path segment when updating a step', async () => {
+      await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      const target = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: { column: 'id', operator: 'eq', value: 'literal' },
+        },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, target.id, {
+          configuration: {
+            table: 't',
+            filter: {
+              column: 'id',
+              operator: 'eq',
+              value: '${steps.create_record.output.__proto__}',
+            },
+          },
+        }),
+      ).rejects.toThrow();
+
+      const [unchanged] = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.id, target.id));
+      expect(unchanged.configuration).toEqual({
+        table: 't',
+        filter: { column: 'id', operator: 'eq', value: 'literal' },
+      });
+    });
+
+    it('rejects adding a forward reference', async () => {
+      const consumer = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 0,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: { column: 'id', operator: 'eq', value: 'literal' },
+        },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 1,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, consumer.id, {
+          configuration: {
+            table: 't',
+            filter: {
+              column: 'id',
+              operator: 'eq',
+              value: '${steps.create_record.output.rows.0.id}',
+            },
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects adding a self-reference', async () => {
+      const step = await createStep(db, workflowA.id, {
+        stepKey: 'a',
+        position: 0,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: { column: 'id', operator: 'eq', value: 'literal' },
+        },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, step.id, {
+          configuration: {
+            table: 't',
+            filter: {
+              column: 'id',
+              operator: 'eq',
+              value: '${steps.a.output.id}',
+            },
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects renaming a step that another enabled step references', async () => {
+      const target = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, target.id, {
+          stepKey: 'renamed',
+        }),
+      ).rejects.toThrow();
+
+      const [unchanged] = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.id, target.id));
+      expect(unchanged.stepKey).toBe('create_record');
+    });
+
+    it('rejects disabling a step that another enabled step references', async () => {
+      const target = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, target.id, {
+          enabled: false,
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects enabling a consumer step whose reference is invalid', async () => {
+      const consumer = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 0,
+        enabled: false,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.unknown_step.output.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.update(adminAActor, projectA.id, workflowA.id, consumer.id, {
+          enabled: true,
+        }),
+      ).rejects.toThrow();
+    });
   });
 
   describe('delete', () => {
@@ -611,6 +882,83 @@ describe('WorkflowStepsService', () => {
           .where(eq(schema.workflowSteps.workflowId, workflowA.id))
       ).map((r) => r.position);
       expect(new Set(positions).size).toBe(positions.length);
+    });
+
+    it('rejects deleting a step referenced by another enabled step', async () => {
+      const target = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.delete(adminAActor, projectA.id, workflowA.id, target.id),
+      ).rejects.toThrow();
+
+      const stillThere = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.id, target.id));
+      expect(stillThere).toHaveLength(1);
+    });
+
+    it('still compacts positions when deleting an unreferenced step', async () => {
+      await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      const unreferenced = await createStep(db, workflowA.id, {
+        stepKey: 'read_record',
+        position: 1,
+        type: 'read',
+        configuration: { table: 't' },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 2,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await service.delete(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        unreferenced.id,
+      );
+
+      const remaining = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, workflowA.id))
+        .orderBy(asc(schema.workflowSteps.position));
+      expect(remaining.map((s) => [s.stepKey, s.position])).toEqual([
+        ['create_record', 0],
+        ['delete_record', 1],
+      ]);
     });
   });
 
@@ -891,6 +1239,164 @@ describe('WorkflowStepsService', () => {
         enabled: true,
         createdAt: d.createdAt,
       });
+    });
+
+    it('preserves a valid order where a dependency stays earlier', async () => {
+      const createRecord = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      const deleteRecord = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+      const unrelated = await createStep(db, workflowA.id, {
+        stepKey: 'wait_step',
+        position: 2,
+        type: 'wait',
+        configuration: { seconds: 1 },
+      });
+
+      const result = await service.reorder(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        { stepIds: [createRecord.id, unrelated.id, deleteRecord.id] },
+      );
+
+      expect(result.map((s) => s.stepKey)).toEqual([
+        'create_record',
+        'wait_step',
+        'delete_record',
+      ]);
+    });
+
+    it('rejects a reorder that turns a valid dependency into a forward reference', async () => {
+      const createRecord = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      const deleteRecord = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowA.id, {
+          stepIds: [deleteRecord.id, createRecord.id],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('leaves positions and timestamps unchanged after a rejected reorder', async () => {
+      const createRecord = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      const deleteRecord = await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.reorder(adminAActor, projectA.id, workflowA.id, {
+          stepIds: [deleteRecord.id, createRecord.id],
+        }),
+      ).rejects.toThrow();
+
+      const rows = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, workflowA.id))
+        .orderBy(asc(schema.workflowSteps.position));
+      expect(rows.map((r) => [r.stepKey, r.position])).toEqual([
+        ['create_record', 0],
+        ['delete_record', 1],
+      ]);
+      expect(rows[0].updatedAt.getTime()).toBe(
+        createRecord.updatedAt.getTime(),
+      );
+      expect(rows[1].updatedAt.getTime()).toBe(
+        deleteRecord.updatedAt.getTime(),
+      );
+
+      // No temporary position (an offset above the real range) survives
+      // a rejected reorder — every persisted position stays within the
+      // original workflow's own valid 0..n-1 range.
+      expect(rows.every((r) => r.position < rows.length)).toBe(true);
+    });
+  });
+
+  describe('ownership and role behavior remains unchanged with references present', () => {
+    it('still enforces ownership/role checks when the workflow has references', async () => {
+      const createRecord = await createStep(db, workflowA.id, {
+        stepKey: 'create_record',
+        position: 0,
+        type: 'insert',
+        configuration: { table: 't', values: { name: 'x' } },
+      });
+      await createStep(db, workflowA.id, {
+        stepKey: 'delete_record',
+        position: 1,
+        type: 'delete',
+        configuration: {
+          table: 't',
+          filter: {
+            column: 'id',
+            operator: 'eq',
+            value: '${steps.create_record.output.rows.0.id}',
+          },
+        },
+      });
+
+      await expect(
+        service.update(
+          viewerAActor,
+          projectA.id,
+          workflowA.id,
+          createRecord.id,
+          {
+            enabled: false,
+          },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.delete(adminBActor, projectA.id, workflowA.id, createRecord.id),
+      ).rejects.toThrow(ProjectNotFoundError);
     });
   });
 });

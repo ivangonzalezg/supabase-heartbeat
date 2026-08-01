@@ -11,16 +11,50 @@ import { invokeFunctionConfigurationSchema } from './invoke-function.schema.js';
 
 /**
  * `stepKey` is stable identity for a step within its workflow: it is used
- * today for the `(workflow_id, step_key)` uniqueness constraint, and will
- * later be referenced by step-output reference syntax (not implemented in
- * this task) — so it must stay a simple, predictable, machine-friendly
- * token. Lowercase letters, digits, hyphens, and underscores only;
- * whitespace and dots are rejected outright rather than silently
- * stripped, since silently modifying a key the caller will later
- * reference elsewhere would be worse than rejecting it up front.
+ * for the `(workflow_id, step_key)` uniqueness constraint, and — as of
+ * this task — as the stable identifier embedded inside step-output
+ * reference strings elsewhere in the same workflow
+ * (`${steps.<step_key>.output.<path>}`, see
+ * `apps/api/src/modules/workflows/references/`). Because other steps'
+ * persisted configuration can literally contain this string, `stepKey`
+ * must be a strict, unambiguous, machine-friendly snake_case token —
+ * silently normalizing (lowercasing, trimming internal characters) a key
+ * the caller will later reference elsewhere would be worse than
+ * rejecting it up front.
+ *
+ * Selected rule (the stricter of the two candidates considered — see
+ * `.agent-reports/2026-08-02-workflow-step-output-references/inspection.md`
+ * for the full rationale): lowercase letters and digits, grouped into
+ * words separated by single underscores, starting with a letter.
+ * Rejects a leading digit, a leading underscore, a trailing underscore,
+ * and consecutive underscores — not merely "prefer" rejecting them, this
+ * schema makes all four structurally impossible, since a key embedded in
+ * another step's reference string should never have an ambiguous or
+ * confusing form.
  */
 export const STEP_KEY_MAX_LENGTH = 100;
-const STEP_KEY_PATTERN = /^[a-z0-9_-]+$/;
+
+/**
+ * The single canonical snake_case pattern for `stepKey`. Exported (not
+ * module-private) because this package is the sole source of truth for
+ * valid `stepKey` syntax: any other code that needs to recognize a
+ * `stepKey` — for example `apps/api`'s step-output reference parser,
+ * which must accept exactly the same keys this schema accepts — must
+ * import this pattern rather than re-declaring its own copy. A second,
+ * independently-maintained copy could silently drift from this one
+ * (e.g. after a future change to this rule) and either reject a valid
+ * key or, worse, accept an invalid one somewhere reference resolution
+ * assumes it cannot occur.
+ */
+export const STEP_KEY_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+/** True for exactly the strings `stepKeySchema` would accept for its
+ * pattern check alone (this does not re-apply length bounds — callers
+ * needing the full `stepKeySchema` guarantee, including length and
+ * trimming, should use `stepKeySchema` itself). */
+export function isValidStepKey(value: string): boolean {
+  return STEP_KEY_PATTERN.test(value);
+}
 
 export const stepKeySchema = z
   .string()
@@ -29,7 +63,10 @@ export const stepKeySchema = z
   .max(STEP_KEY_MAX_LENGTH)
   .regex(
     STEP_KEY_PATTERN,
-    'stepKey must contain only lowercase letters, numbers, hyphens, and underscores',
+    'stepKey must be snake_case: start with a lowercase letter, contain ' +
+      'only lowercase letters, digits, and single underscores between ' +
+      'words (no leading digit, no leading/trailing underscore, no ' +
+      'consecutive underscores)',
   );
 
 const enabledSchema = z.boolean().optional();

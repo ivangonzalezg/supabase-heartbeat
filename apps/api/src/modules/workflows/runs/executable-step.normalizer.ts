@@ -1,11 +1,17 @@
-import { parseWorkflowStepConfiguration } from '@supabase-heartbeat/validation';
+import {
+  parseWorkflowStepConfiguration,
+  type JsonValue,
+} from '@supabase-heartbeat/validation';
 import type { WorkflowStep } from '../../../database/schema/types';
 import type { ExecutableWorkflowStep } from '../../workflow-execution/contracts';
+import { ResolvedStepConfigurationError } from '../references/workflow-reference.errors';
 
 /**
- * Thrown when a persisted `workflow_steps` row cannot be normalized into
- * an `ExecutableWorkflowStep` — i.e. its `type`/`configuration` pair
- * fails the same shared validation schema enforced at write time.
+ * Thrown when a persisted `workflow_steps` row's own, unresolved
+ * `type`/`configuration` pair fails the same shared validation schema
+ * enforced at write time — i.e. the failure is unrelated to reference
+ * resolution; the row itself was already invalid before any reference
+ * was substituted.
  *
  * This should not happen for data written through the existing
  * workflow-step API (which already validates `type`/`configuration`
@@ -26,23 +32,54 @@ export class InvalidPersistedStepConfigurationError extends Error {
 }
 
 /**
- * Converts a persisted `workflow_steps` row into the `StepExecutor`
- * contract's `ExecutableWorkflowStep`, re-validating `type`/
- * `configuration` together via the same shared schema enforced at write
- * time. Throws `InvalidPersistedStepConfigurationError` (never the raw
- * Zod issue list, which could echo back configuration values) if the
- * persisted row does not validate.
+ * Re-validates a persisted `workflow_steps` row's own `type`/
+ * `configuration` pair (before any reference resolution) via the same
+ * shared schema enforced at write time. Throws
+ * `InvalidPersistedStepConfigurationError` (never the raw Zod issue
+ * list, which could echo back configuration values) if the persisted
+ * row does not validate on its own. Used by
+ * `WorkflowRunsService.createRun` as part of preflight — this call
+ * happens *before* any reference is resolved, so it never has a
+ * resolved value to report either.
  */
-export function toExecutableWorkflowStep(
+export function assertPersistedStepConfigurationIsValid(
   row: WorkflowStep,
-): ExecutableWorkflowStep<WorkflowStep['type']> {
+): void {
   const parsed = parseWorkflowStepConfiguration({
     type: row.type,
     configuration: row.configuration,
   });
-
   if (!parsed.success) {
     throw new InvalidPersistedStepConfigurationError(row.stepKey);
+  }
+}
+
+/**
+ * Builds the `StepExecutor` contract's `ExecutableWorkflowStep` from a
+ * persisted `workflow_steps` row and its **already-resolved**
+ * configuration (references substituted, see
+ * `references/resolve-step-references.ts`) — re-validates `type`/
+ * `resolvedConfiguration` together via the same shared schema enforced
+ * at write time, since a resolved reference value (e.g. a number
+ * substituted into a field requiring a string) can make an otherwise
+ * valid configuration shape invalid. Throws
+ * `ResolvedStepConfigurationError` (never the raw Zod issue list or the
+ * resolved value itself) if the resolved pair does not validate.
+ */
+export function toExecutableWorkflowStep(
+  row: WorkflowStep,
+  resolvedConfiguration: JsonValue,
+): ExecutableWorkflowStep<WorkflowStep['type']> {
+  const parsed = parseWorkflowStepConfiguration({
+    type: row.type,
+    configuration: resolvedConfiguration,
+  });
+
+  if (!parsed.success) {
+    throw new ResolvedStepConfigurationError({
+      stepKey: row.stepKey,
+      stepType: row.type,
+    });
   }
 
   return {

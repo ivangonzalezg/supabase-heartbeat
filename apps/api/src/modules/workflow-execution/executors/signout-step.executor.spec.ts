@@ -12,7 +12,7 @@ function buildStep(): ExecutableWorkflowStep<'signout'> {
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'end-session',
+    stepKey: 'end_session',
     type: 'signout',
     position: 1,
     configuration: {},

@@ -26,7 +26,7 @@ function buildStep(
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'update-heartbeat-row',
+    stepKey: 'update_heartbeat_row',
     type: 'update',
     position: 0,
     configuration: {

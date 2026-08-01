@@ -333,7 +333,7 @@ describe('ProjectsService', () => {
         .values({
           id: crypto.randomUUID(),
           workflowId: workflow.id,
-          stepKey: 'step-1',
+          stepKey: 'step_1',
           type: 'wait',
           position: 0,
           configuration: {},

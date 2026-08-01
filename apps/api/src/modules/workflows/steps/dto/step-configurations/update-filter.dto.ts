@@ -30,8 +30,12 @@ export class UpdateFilterDto {
   @ApiProperty({
     description:
       'The value to compare the column against. Any JSON value ' +
-      '(string, number, boolean, null, array, or object).',
-    example: 'row-id-value',
+      '(string, number, boolean, null, array, or object). May instead ' +
+      'be a whole-value step-output reference to an earlier, enabled ' +
+      'step in the same workflow, e.g. ' +
+      '`${steps.create_record.output.rows.0.id}` — see ' +
+      '`InsertStepConfigurationDto.values` for the full reference syntax.',
+    example: '${steps.create_record.output.rows.0.id}',
     oneOf: [
       { type: 'string' },
       { type: 'number' },

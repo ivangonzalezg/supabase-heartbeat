@@ -284,7 +284,7 @@ describe('Workflow Runs API (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       steps: [
-        { stepKey: 'wait-1', type: 'wait', configuration: { seconds: 1 } },
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
       ],
     });
 
@@ -311,7 +311,7 @@ describe('Workflow Runs API (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       steps: [
-        { stepKey: 'wait-1', type: 'wait', configuration: { seconds: 1 } },
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
       ],
     });
 
@@ -349,7 +349,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: {
             email: 'heartbeat-user@example.com',
@@ -357,7 +357,7 @@ describe('Workflow Runs API (e2e)', () => {
           },
         },
         { stepKey: 'pause', type: 'wait', configuration: { seconds: 1 } },
-        { stepKey: 'sign-out', type: 'signout', configuration: {} },
+        { stepKey: 'sign_out', type: 'signout', configuration: {} },
       ],
     });
 
@@ -389,11 +389,11 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: { email: 'a@example.com', password: 'x' },
         },
-        { stepKey: 'sign-out', type: 'signout', configuration: {} },
+        { stepKey: 'sign_out', type: 'signout', configuration: {} },
       ],
     });
 
@@ -419,7 +419,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: {
             email: 'heartbeat-user@example.com',
@@ -455,7 +455,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: { email: 'a@example.com', password: 'x' },
         },
@@ -487,7 +487,7 @@ describe('Workflow Runs API (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       steps: [
-        { stepKey: 'wait-1', type: 'wait', configuration: { seconds: 1 } },
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
       ],
     });
 
@@ -495,7 +495,7 @@ describe('Workflow Runs API (e2e)', () => {
       .post(`/api/projects/${projectId}/workflows/${workflow.id}/steps`)
       .set('Cookie', admin.cookie)
       .send({
-        stepKey: 'wait-2',
+        stepKey: 'wait_2',
         type: 'wait',
         configuration: { seconds: 1 },
         enabled: false,
@@ -525,7 +525,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       enabled: false,
       steps: [
-        { stepKey: 'wait-1', type: 'wait', configuration: { seconds: 1 } },
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
       ],
     });
 
@@ -574,7 +574,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: { email: 'a@example.com', password: 'wrong' },
         },
@@ -652,7 +652,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: { email: 'a@example.com', password: 'irrelevant' },
         },
@@ -725,7 +725,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'insert-row',
+          stepKey: 'insert_row',
           type: 'insert',
           configuration: { table: 'profiles', values: { active: true } },
         },
@@ -756,7 +756,7 @@ describe('Workflow Runs API (e2e)', () => {
       timezone: 'UTC',
       steps: [
         {
-          stepKey: 'wait-1',
+          stepKey: 'wait_1',
           type: 'wait',
           configuration: { seconds: 1 },
           enabled: false,
@@ -786,7 +786,7 @@ describe('Workflow Runs API (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       steps: [
-        { stepKey: 'wait-1', type: 'wait', configuration: { seconds: 1 } },
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
       ],
     });
 
@@ -832,12 +832,12 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'a-signin',
+            stepKey: 'a_signin',
             type: 'signin',
             configuration: { email: 'a@example.com', password: TEST_PASSWORD },
           },
           {
-            stepKey: 'b-insert',
+            stepKey: 'b_insert',
             type: 'insert',
             configuration: {
               table: 'heartbeats',
@@ -845,12 +845,12 @@ describe('Workflow Runs API (e2e)', () => {
             },
           },
           {
-            stepKey: 'c-read',
+            stepKey: 'c_read',
             type: 'read',
             configuration: { table: 'heartbeats', columns: '*' },
           },
           {
-            stepKey: 'd-update',
+            stepKey: 'd_update',
             type: 'update',
             configuration: {
               table: 'heartbeats',
@@ -863,7 +863,7 @@ describe('Workflow Runs API (e2e)', () => {
             },
           },
           {
-            stepKey: 'e-delete',
+            stepKey: 'e_delete',
             type: 'delete',
             configuration: {
               table: 'heartbeats',
@@ -875,12 +875,12 @@ describe('Workflow Runs API (e2e)', () => {
             },
           },
           {
-            stepKey: 'f-invoke',
+            stepKey: 'f_invoke',
             type: 'invoke_function',
             configuration: { functionName: 'send-heartbeat' },
           },
-          { stepKey: 'g-wait', type: 'wait', configuration: { seconds: 1 } },
-          { stepKey: 'h-signout', type: 'signout', configuration: {} },
+          { stepKey: 'g_wait', type: 'wait', configuration: { seconds: 1 } },
+          { stepKey: 'h_signout', type: 'signout', configuration: {} },
         ],
       };
     }
@@ -960,7 +960,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'insert-row',
+            stepKey: 'insert_row',
             type: 'insert',
             configuration: {
               table: 'heartbeats',
@@ -995,7 +995,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'read-rows',
+            stepKey: 'read_rows',
             type: 'read',
             configuration: { table: 'heartbeats', columns: '*' },
           },
@@ -1025,7 +1025,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'update-row',
+            stepKey: 'update_row',
             type: 'update',
             configuration: {
               table: 'heartbeats',
@@ -1059,7 +1059,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'delete-row',
+            stepKey: 'delete_row',
             type: 'delete',
             configuration: {
               table: 'heartbeats',
@@ -1092,7 +1092,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'invoke-fn',
+            stepKey: 'invoke_fn',
             type: 'invoke_function',
             configuration: { functionName: 'send-heartbeat' },
           },
@@ -1122,7 +1122,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'insert-row',
+            stepKey: 'insert_row',
             type: 'insert',
             configuration: {
               table: 'heartbeats',
@@ -1201,7 +1201,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'insert-row',
+            stepKey: 'insert_row',
             type: 'insert',
             configuration: {
               table: 'heartbeats',
@@ -1209,7 +1209,7 @@ describe('Workflow Runs API (e2e)', () => {
             },
           },
           {
-            stepKey: 'read-rows',
+            stepKey: 'read_rows',
             type: 'read',
             configuration: { table: 'heartbeats', columns: '*' },
           },
@@ -1274,7 +1274,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'invoke-fn',
+            stepKey: 'invoke_fn',
             type: 'invoke_function',
             configuration: { functionName: 'send-heartbeat' },
           },
@@ -1335,7 +1335,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'invoke-fn',
+            stepKey: 'invoke_fn',
             type: 'invoke_function',
             configuration: { functionName: 'send-heartbeat' },
           },
@@ -1403,7 +1403,7 @@ describe('Workflow Runs API (e2e)', () => {
         timezone: 'UTC',
         steps: [
           {
-            stepKey: 'update-row',
+            stepKey: 'update_row',
             type: 'update',
             configuration: {
               table: 'heartbeats',
@@ -1436,6 +1436,645 @@ describe('Workflow Runs API (e2e)', () => {
       expect(body.stepRuns[0].error).not.toContain('super-secret-filter-value');
       expect(body.stepRuns[0].error).not.toContain('row violates policy');
       expect(body.stepRuns[0].error).not.toContain('conflicts');
+    });
+  });
+
+  describe('output references', () => {
+    function signinInsertDeleteSignoutWorkflow() {
+      return {
+        name: 'Cleanup flow',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'sign_in',
+            type: 'signin',
+            configuration: { email: 'a@example.com', password: TEST_PASSWORD },
+          },
+          {
+            stepKey: 'create_record',
+            type: 'insert',
+            configuration: {
+              table: 'heartbeat_records',
+              values: { name: 'Heartbeat' },
+            },
+          },
+          {
+            stepKey: 'delete_record',
+            type: 'delete',
+            configuration: {
+              table: 'heartbeat_records',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: '${steps.create_record.output.rows.0.id}',
+              },
+            },
+          },
+          { stepKey: 'sign_out', type: 'signout', configuration: {} },
+        ],
+      };
+    }
+
+    it('creates a workflow with signin/insert/delete-referencing/signout, manual execution returns 201 and succeeds', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('success');
+      expect(body.stepRuns).toHaveLength(4);
+    });
+
+    it('delete receives the resolved ID from the earlier insert', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      expect(mockClient.__mocks.deleteEq).toHaveBeenCalledWith(
+        'id',
+        'inserted-row-id',
+      );
+    });
+
+    it('the resolved step-run snapshot contains the resolved ID, not the reference string', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      const deleteStepRun = body.stepRuns[2];
+      const snapshot = deleteStepRun.inputSnapshot as {
+        configuration: { filter: { value: string } };
+      };
+      expect(snapshot.configuration.filter.value).toBe('inserted-row-id');
+    });
+
+    it('the persisted workflow-step configuration still contains the reference string', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const stepsResponse = await request(app.getHttpServer())
+        .get(`/api/projects/${projectId}/workflows/${workflow.id}/steps`)
+        .set('Cookie', admin.cookie)
+        .expect(200);
+      const steps = stepsResponse.body as {
+        stepKey: string;
+        configuration: { filter?: { value: string } };
+      }[];
+      const deleteStep = steps.find((s) => s.stepKey === 'delete_record')!;
+      expect(deleteStep.configuration.filter?.value).toBe(
+        '${steps.create_record.output.rows.0.id}',
+      );
+    });
+
+    it('returns a failed run when the runtime row path is missing', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: { insert: { data: [], error: null } },
+      });
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      expect(body.status).toBe('failed');
+      expect(body.stepRuns[2].status).toBe('failed');
+    });
+
+    it('does not execute later steps after a missing runtime path failure', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: { insert: { data: [], error: null } },
+      });
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+
+      const body = response.body as WorkflowRunResponseBody;
+      // signin, insert, and the failed delete — signout never attempted.
+      expect(body.stepRuns).toHaveLength(3);
+      expect(mockClient.auth.signOut).not.toHaveBeenCalled();
+    });
+
+    it('rejects a forward reference during workflow creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Invalid forward reference',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.create_record.output.rows.0.id}',
+                },
+              },
+            },
+            {
+              stepKey: 'create_record',
+              type: 'insert',
+              configuration: { table: 't', values: { name: 'x' } },
+            },
+          ],
+        })
+        .expect(409);
+    });
+
+    it('rejects an unknown referenced key during workflow creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Invalid unknown reference',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.unknown_step.output.id}',
+                },
+              },
+            },
+          ],
+        })
+        .expect(409);
+    });
+
+    it('returns conflict when a reorder would break a reference', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Reorder test',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'create_record',
+            type: 'insert',
+            configuration: { table: 't', values: { name: 'x' } },
+          },
+          {
+            stepKey: 'delete_record',
+            type: 'delete',
+            configuration: {
+              table: 't',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: '${steps.create_record.output.rows.0.id}',
+              },
+            },
+          },
+        ],
+      });
+      const [createStep, deleteStep] = workflow.steps;
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/workflows/${workflow.id}/steps/order`)
+        .set('Cookie', admin.cookie)
+        .send({ stepIds: [deleteStep.id, createStep.id] })
+        .expect(409);
+    });
+
+    it('returns conflict when deleting a referenced step', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Deletion conflict test',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'create_record',
+            type: 'insert',
+            configuration: { table: 't', values: { name: 'x' } },
+          },
+          {
+            stepKey: 'delete_record',
+            type: 'delete',
+            configuration: {
+              table: 't',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: '${steps.create_record.output.rows.0.id}',
+              },
+            },
+          },
+        ],
+      });
+      const [createStep] = workflow.steps;
+
+      await request(app.getHttpServer())
+        .delete(
+          `/api/projects/${projectId}/workflows/${workflow.id}/steps/${createStep.id}`,
+        )
+        .set('Cookie', admin.cookie)
+        .expect(409);
+    });
+
+    it('returns conflict when renaming a referenced key', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Rename conflict test',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'create_record',
+            type: 'insert',
+            configuration: { table: 't', values: { name: 'x' } },
+          },
+          {
+            stepKey: 'delete_record',
+            type: 'delete',
+            configuration: {
+              table: 't',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: '${steps.create_record.output.rows.0.id}',
+              },
+            },
+          },
+        ],
+      });
+      const [createStep] = workflow.steps;
+
+      await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectId}/workflows/${workflow.id}/steps/${createStep.id}`,
+        )
+        .set('Cookie', admin.cookie)
+        .send({ stepKey: 'renamed_record' })
+        .expect(409);
+    });
+
+    it('returns conflict when disabling a referenced step', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(app, admin, projectId, {
+        name: 'Disable conflict test',
+        cronExpression: '0 * * * *',
+        timezone: 'UTC',
+        steps: [
+          {
+            stepKey: 'create_record',
+            type: 'insert',
+            configuration: { table: 't', values: { name: 'x' } },
+          },
+          {
+            stepKey: 'delete_record',
+            type: 'delete',
+            configuration: {
+              table: 't',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: '${steps.create_record.output.rows.0.id}',
+              },
+            },
+          },
+        ],
+      });
+      const [createStep] = workflow.steps;
+
+      await request(app.getHttpServer())
+        .patch(
+          `/api/projects/${projectId}/workflows/${workflow.id}/steps/${createStep.id}`,
+        )
+        .set('Cookie', admin.cookie)
+        .send({ enabled: false })
+        .expect(409);
+    });
+
+    it('rejects partial interpolation during workflow creation', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Partial interpolation test',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'create_record',
+              type: 'insert',
+              configuration: { table: 't', values: { name: 'x' } },
+            },
+            {
+              stepKey: 'notify',
+              type: 'invoke_function',
+              configuration: {
+                functionName: 'fn',
+                body: {
+                  message: 'created ${steps.create_record.output.rows.0.id}',
+                },
+              },
+            },
+          ],
+        })
+        .expect(409);
+    });
+
+    it('viewer behavior remains unchanged for workflows containing references', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const viewer = await createAndSignIn(
+        app,
+        `viewer-${crypto.randomUUID()}@example.com`,
+        'viewer',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', viewer.cookie)
+        .expect(403);
+    });
+
+    it('ownership behavior remains unchanged for workflows containing references', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const otherAdmin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', otherAdmin.cookie)
+        .expect(404);
+    });
+
+    it('never exposes password/token/session values in reference-related errors', async () => {
+      const admin = await createAndSignIn(
+        app,
+        `admin-${crypto.randomUUID()}@example.com`,
+        'admin',
+      );
+      const projectId = await createProjectAs(app, admin);
+      const workflow = await createWorkflowAs(
+        app,
+        admin,
+        projectId,
+        signinInsertDeleteSignoutWorkflow(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows`)
+        .set('Cookie', admin.cookie)
+        .send({
+          name: 'Should fail reference validation',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          steps: [
+            {
+              stepKey: 'sign_in',
+              type: 'signin',
+              configuration: {
+                email: 'a@example.com',
+                password: TEST_PASSWORD,
+              },
+            },
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.unknown_step.output.id}',
+                },
+              },
+            },
+          ],
+        })
+        .expect(409);
+
+      const serialized = JSON.stringify(response.body);
+      expect(serialized).not.toContain(TEST_PASSWORD);
+      expect(serialized).not.toContain('mock-access-token-not-real');
+
+      // Ensure the earlier valid workflow (created before the failed
+      // attempt) still executes fine, confirming the failed attempt
+      // above did not corrupt shared test state.
+      await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/workflows/${workflow.id}/runs`)
+        .set('Cookie', admin.cookie)
+        .expect(201);
+    });
+
+    it('documents the reference syntax in /api/openapi.json', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/openapi.json')
+        .expect(200);
+      const document = response.body as OpenAPIDocument;
+      const serialized = JSON.stringify(document);
+
+      expect(serialized).toContain('steps.<step_key>.output');
     });
   });
 });

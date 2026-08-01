@@ -21,8 +21,14 @@ export class InvokeFunctionStepConfigurationDto {
   @ApiPropertyOptional({
     description:
       'The JSON request body to send to the function, if any. Any ' +
-      'JSON value is accepted.',
-    example: { message: 'heartbeat' },
+      'JSON value is accepted. Any string value inside the body ' +
+      '(including the whole body itself) may instead be a whole-value ' +
+      'step-output reference to an earlier, enabled step — see ' +
+      '`InsertStepConfigurationDto.values` for the full reference syntax.',
+    example: {
+      message: 'heartbeat',
+      user_id: '${steps.read_profile.output.rows.0.id}',
+    },
     type: 'object',
     additionalProperties: true,
   })

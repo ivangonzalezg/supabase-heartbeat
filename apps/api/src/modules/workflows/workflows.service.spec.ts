@@ -71,7 +71,7 @@ const validCreateInput = {
   cronExpression: '0 */6 * * *',
   timezone: 'UTC',
   steps: [
-    { stepKey: 'wait-1', type: 'wait' as const, configuration: { seconds: 5 } },
+    { stepKey: 'wait_1', type: 'wait' as const, configuration: { seconds: 5 } },
   ],
 };
 
@@ -175,7 +175,7 @@ describe('WorkflowsService', () => {
 
       expect(workflow.steps).toHaveLength(1);
       expect(workflow.steps[0]).toMatchObject({
-        stepKey: 'wait-1',
+        stepKey: 'wait_1',
         type: 'wait',
         position: 0,
         configuration: { seconds: 5 },
@@ -245,6 +245,192 @@ describe('WorkflowsService', () => {
 
       const allSteps = await db.select().from(schema.workflowSteps);
       expect(allSteps).toHaveLength(0);
+    });
+  });
+
+  describe('output references', () => {
+    it('creates a workflow whose steps contain valid earlier-step references', async () => {
+      const workflow = await service.create(adminAActor, projectA.id, {
+        ...validCreateInput,
+        steps: [
+          {
+            stepKey: 'create_record',
+            type: 'insert',
+            configuration: { table: 't', values: { name: 'x' } },
+          },
+          {
+            stepKey: 'delete_record',
+            type: 'delete',
+            configuration: {
+              table: 't',
+              filter: {
+                column: 'id',
+                operator: 'eq',
+                value: '${steps.create_record.output.rows.0.id}',
+              },
+            },
+          },
+        ],
+      });
+
+      expect(workflow.steps).toHaveLength(2);
+    });
+
+    it('rolls back the entire creation when a step references an unknown step', async () => {
+      const beforeWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+
+      await expect(
+        service.create(adminAActor, projectA.id, {
+          ...validCreateInput,
+          steps: [
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.unknown_step.output.id}',
+                },
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+
+      const afterWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+      expect(afterWorkflowCount).toBe(beforeWorkflowCount);
+      expect(await db.select().from(schema.workflowSteps)).toHaveLength(0);
+    });
+
+    it('rolls back the entire creation when a step references a later step', async () => {
+      const beforeWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+
+      await expect(
+        service.create(adminAActor, projectA.id, {
+          ...validCreateInput,
+          steps: [
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.create_record.output.rows.0.id}',
+                },
+              },
+            },
+            {
+              stepKey: 'create_record',
+              type: 'insert',
+              configuration: { table: 't', values: { name: 'x' } },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+
+      const afterWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+      expect(afterWorkflowCount).toBe(beforeWorkflowCount);
+      expect(await db.select().from(schema.workflowSteps)).toHaveLength(0);
+    });
+
+    it('rejects a dangerous path segment during creation and creates no workflow run', async () => {
+      const beforeWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+
+      await expect(
+        service.create(adminAActor, projectA.id, {
+          ...validCreateInput,
+          steps: [
+            {
+              stepKey: 'create_record',
+              type: 'insert',
+              configuration: { table: 't', values: { name: 'x' } },
+            },
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.create_record.output.__proto__}',
+                },
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+
+      const afterWorkflowCount = (await db.select().from(schema.workflows))
+        .length;
+      expect(afterWorkflowCount).toBe(beforeWorkflowCount);
+      expect(await db.select().from(schema.workflowSteps)).toHaveLength(0);
+      // No workflow_run row is ever created for a structurally invalid
+      // aggregate, since validation happens before any run can be
+      // requested for a workflow that itself failed to persist.
+      expect(await db.select().from(schema.workflowRuns)).toHaveLength(0);
+    });
+
+    it('rejects a reference to a disabled step', async () => {
+      await expect(
+        service.create(adminAActor, projectA.id, {
+          ...validCreateInput,
+          steps: [
+            {
+              stepKey: 'create_record',
+              type: 'insert',
+              configuration: { table: 't', values: { name: 'x' } },
+              enabled: false,
+            },
+            {
+              stepKey: 'delete_record',
+              type: 'delete',
+              configuration: {
+                table: 't',
+                filter: {
+                  column: 'id',
+                  operator: 'eq',
+                  value: '${steps.create_record.output.rows.0.id}',
+                },
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects partial interpolation', async () => {
+      await expect(
+        service.create(adminAActor, projectA.id, {
+          ...validCreateInput,
+          steps: [
+            {
+              stepKey: 'create_record',
+              type: 'insert',
+              configuration: { table: 't', values: { name: 'x' } },
+            },
+            {
+              stepKey: 'notify',
+              type: 'invoke_function',
+              configuration: {
+                functionName: 'fn',
+                body: {
+                  message: 'created ${steps.create_record.output.rows.0.id}',
+                },
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
     });
   });
 
@@ -591,7 +777,7 @@ describe('WorkflowsService', () => {
         .values({
           id: crypto.randomUUID(),
           workflowId: created.id,
-          stepKey: 'step-2',
+          stepKey: 'step_2',
           type: 'wait',
           position: 1,
           configuration: {},

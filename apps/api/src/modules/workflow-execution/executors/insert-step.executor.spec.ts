@@ -16,7 +16,7 @@ function buildStep(
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'create-heartbeat-row',
+    stepKey: 'create_heartbeat_row',
     type: 'insert',
     position: 0,
     configuration: { table: TABLE, values: VALUES, ...overrides },

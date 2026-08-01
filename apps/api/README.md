@@ -46,6 +46,14 @@ Currently implemented:
   `src/modules/workflows/runs/`) — synchronous, admin-only execution of
   a workflow's enabled steps in order, with `workflow_runs`/`step_runs`
   persistence — see "Workflow Runs API" below.
+* Workflow-step output references
+  (`${steps.<step_key>.output.<path>}`, `src/modules/workflows/references/`)
+  — a step's configuration may reference an earlier, enabled step's
+  output by its stable snake_case `stepKey`, resolved and type-preserved
+  at execution time, with preflight structural validation across
+  aggregate creation, individual step create/update, reordering, and
+  manual execution — see "Output references" under "Workflow Runs API"
+  below.
 * A development proxy that forwards non-API requests to the Vite dev
   server, so the browser only ever talks to this API.
 * Production static hosting of the compiled frontend, with an SPA fallback.
@@ -54,9 +62,9 @@ Currently implemented:
 
 * Scheduler integration and cron-triggered execution.
 * Workflow-run overlap prevention, retries, cancellation, and timeouts.
-* Output-reference resolution between steps (`${steps...}` syntax) and
-  interpolation — the current output contracts (`{ rows, count }` /
-  `{ data }`) are intentionally designed to support this later.
+* Partial string interpolation (a reference embedded inside a larger
+  string) and expressions/arithmetic/fallback values built on top of
+  output references — only whole-value references are implemented.
 * Run-history read endpoints (`GET` list/detail for past runs).
 * Remote-operation compensation/rollback — a later step's failure never
   reverses an earlier step's already-committed Supabase side effects.
@@ -639,7 +647,12 @@ computed and inserted inside a transaction so a concurrent append cannot
 race past the read. The database's own unique
 `(workflow_id, position)` constraint is the final safety net. A
 `stepKey` already used by another step in the same workflow is rejected
-with `409 Conflict`.
+with `409 Conflict`. Because append always places the new step last, its
+`configuration` may reference any enabled *existing* step
+(`${steps.<step_key>.output.<path>}` — see "Output references" under
+"Workflow Runs API" below); a malformed or otherwise invalid reference
+(unknown key, forward/self reference, disabled-step reference, partial
+interpolation) is rejected with `409 Conflict` and no step is created.
 
 **Update step** (`PATCH`, body: any of `stepKey, type, configuration,
 enabled`): `position` is never accepted here — use `PUT .../steps/order`
@@ -651,7 +664,17 @@ changing only `type` while an old, now-incompatible `configuration`
 remains from before is rejected unless a valid `configuration` for the
 new `type` is supplied in the same request. Renaming `stepKey` to a value
 already used by another step in the same workflow returns
-`409 Conflict`.
+`409 Conflict`. The resulting complete ordered workflow (this step's
+merged result, every other step unchanged) is also validated for
+step-output references as a whole, before anything is written:
+**renaming** a `stepKey` that another enabled step still references by
+its old key is rejected with `409 Conflict` (references are never
+automatically rewritten); **disabling** a step another enabled step
+references is rejected; **enabling** a step whose own references are no
+longer valid is rejected; adding a new reference that is unknown,
+forward, self-referencing, or targets a disabled step is rejected.
+Changing a referenced step's `type` does not by itself invalidate a
+reference (the runtime output path is not known until execution).
 
 **Delete step** (`DELETE`, `204 No Content` on success): deletes the step
 and **compacts** the remaining steps' positions to stay contiguous in the
@@ -664,7 +687,10 @@ relaxed. **Deleting the last remaining step of a workflow is rejected
 with `409 Conflict`** — a workflow without any steps cannot be created
 through the aggregate endpoint, and for consistency the same floor
 applies to deletion; delete the workflow itself instead (this cascades to
-all of its steps).
+all of its steps). **Deleting a step that another enabled step still
+references is rejected with `409 Conflict`** (`ReferencedStepDeletionConflictError`)
+— the target step and all positions are left unchanged; deleting an
+unreferenced step still compacts positions normally.
 
 **Reorder steps** (`PUT .../steps/order`, body: `{ stepIds: string[] }`,
 admin only): replaces the workflow's **complete** step order in one
@@ -689,10 +715,17 @@ array order defines the final position (`stepIds[0]` becomes position
   — duplicate IDs are never silently deduplicated;
 * submitting the current order is valid and is a no-op — it returns
   `200 OK` with the current step list and performs zero database writes
-  (see "Timestamp policy" below).
+  (see "Timestamp policy" below);
+* a structurally valid order that would turn an existing valid
+  step-output reference into a forward reference (the referenced step no
+  longer appears earlier) is rejected with `409 Conflict`, validated
+  against the *proposed* order before any temporary position is written
+  — the original order and timestamps are left completely unchanged, and
+  no partial reorder is ever possible.
 
 The entire operation — ownership verification, loading the current
-steps, validating the submitted ID set exactly matches, and the position
+steps, validating the submitted ID set exactly matches, validating
+step-output references against the proposed order, and the position
 rewrite — runs inside a single Drizzle/SQLite transaction
 (`WorkflowStepsService.reorder`). The rewrite reuses the same
 collision-safe two-pass strategy as delete compaction, extracted into a
@@ -798,8 +831,9 @@ Level Security is enforced by Supabase exactly as it would be for that
 session**; nothing in these executors bypasses RLS or uses a
 service-role key.
 
-**Stable output contracts**, designed to later become the source for
-cross-step output references (not implemented in this task):
+**Stable output contracts**, which are exactly what a later, enabled
+step's `${steps.<step_key>.output.<path>}` reference resolves against
+(see "Output references" under "Workflow Runs API" below):
 
 * `insert`, `read`, `update`, `delete` → `{ rows: JsonObject[], count:
   number }`. `count` is always `rows.length`, never a separately
@@ -998,22 +1032,137 @@ already-committed remote effects are reversed.** SQLite persistence in
 `workflow_runs`/`step_runs` records what happened; it is not a
 distributed transaction spanning the local database and the remote
 Supabase project, and this task does not implement any compensation or
-automatic rollback logic. A workflow that needs cleanup after a
-partial failure should include explicit cleanup steps (e.g. a `delete`
-step targeting rows an earlier `insert` step created) — output
-references between steps (needed to target "the row the earlier step
-just created" precisely) are not implemented yet, so such cleanup
-workflows are only partially practical today; this is one of the
-motivations for the stable `{ rows, count }` / `{ data }` output
-contracts already in place.
+automatic rollback logic. A workflow that needs cleanup after a partial
+failure should include explicit cleanup steps (e.g. a `delete` step
+targeting rows an earlier `insert` step created) — output references
+(below) make this practical: a `delete` step's filter can target
+`${steps.create_record.output.rows.0.id}`, the exact row an earlier
+`insert` step just created, without hardcoding an ID the workflow
+author cannot know in advance.
+
+### Output references
+
+A workflow step's `configuration` may reference the output of an
+earlier, enabled step in the same workflow, using the step's stable
+`stepKey` (`src/modules/workflows/references/`):
+
+```text
+${steps.<step_key>.output.<path>}
+```
+
+Example — a `delete` step's filter value referencing the row an earlier
+`insert` step just created:
+
+```json
+{
+  "table": "heartbeat_records",
+  "filter": {
+    "column": "id",
+    "operator": "eq",
+    "value": "${steps.create_record.output.rows.0.id}"
+  }
+}
+```
+
+`<path>` is one or more dot-separated segments addressing an object
+property or a zero-based array index into the referenced step's output
+(`rows.0.id`, `data.status`, `count`). Every reference must include the
+literal `output` segment — there is no way to reference a step's raw
+input/configuration, another namespace, or a step from a different
+workflow or a previous run.
+
+**Whole-value only, for now.** A reference is resolved only when the
+entire string value is exactly one reference — `"${steps.a.output.id}"`
+is supported, `"id: ${steps.a.output.id}"` (partial interpolation) is
+not, and is rejected during validation (aggregate creation, individual
+step create/update, and reorder) rather than left unresolved. Partial
+string interpolation may be added in a later task; it is out of scope
+here.
+
+**Type preservation.** The resolved value replaces the reference string
+entirely and keeps its original JSON type — a referenced number stays a
+number, a referenced object stays an object, `null` stays `null`. Values
+are never coerced to strings, and an object/array is never stringified.
+
+**Only earlier, enabled steps** may be referenced — a step cannot
+reference itself, a later step, or a disabled step. Because only
+strictly earlier steps are ever allowed, a structurally valid workflow
+can never contain a reference cycle by construction (see
+`validateWorkflowReferences` in
+`references/validate-workflow-references.ts`).
+
+**Preflight (structural) validation** happens before any Supabase side
+effect: for aggregate workflow creation, individual step create/update,
+and reordering, the proposed complete ordered step list is validated
+(syntax, unique/known `stepKey`, order, enabled state) before anything
+is written — an invalid reference creates or changes nothing. For
+manual execution, the same structural validation runs inside the same
+transaction that verifies ownership and inserts the initial
+`workflow_runs` row, *before* that row is inserted — a structurally
+invalid workflow creates no run at all. This validation only checks
+structure (does the key exist, is it earlier, is it enabled); it never
+attempts to prove a reference's `<path>` will exist in a future
+execution's actual output, since that depends on remote data unknowable
+until the referenced step actually runs.
+
+**Runtime resolution.** During one manual run, a run-local, in-memory
+map (`stepKey -> output`, never a database field, never shared across
+runs or cached by workflow) records every enabled step's successful
+output as it completes. For each subsequent enabled step, before it
+runs: its persisted configuration is recursively cloned, every reference
+is replaced with the resolved value from that map, the resolved
+`type`/configuration pair is re-validated against the same shared schema
+enforced at write time (a reference resolving to the wrong type — e.g. a
+number where a string is required — fails safely without ever calling
+the executor), and the resulting **resolved** configuration becomes both
+what the executor actually receives and what is persisted in that step
+run's `inputSnapshot`. **The persisted `workflow_steps.configuration`
+itself is never modified** — it still contains the original
+`${steps...}` reference string; only the separate `step_runs` row
+reflects the resolved value. `signin.password` continues to be redacted
+to `"[REDACTED]"` in the snapshot exactly as before, including when a
+password field happens to be (unusually) populated via a reference.
+
+A path that cannot be resolved against the referenced step's actual
+output (a missing property, a missing array index, indexing a
+non-array, or property access on a primitive) fails the **current**
+step safely — the workflow run becomes `failed`, exactly like any other
+technical step failure, and later steps are never attempted. This is a
+`201` response with `status: "failed"`, not a `5xx` — see "request
+failure versus failed-run response" above.
+
+A path segment naming a dangerous property (`__proto__`/`constructor`/
+`prototype`) is instead rejected earlier, during parsing — which is
+also preflight-validation time — so a reference containing one never
+passes structural validation at all: it is refused during workflow
+creation/update/reordering, or during a manual run's own preflight
+check, before any `workflow_runs` row exists. The runtime resolver
+keeps its own independent denylist and `hasOwnProperty` check as a
+second, defense-in-depth layer regardless, but under normal operation
+that layer is unreachable via an ordinary reference string, since the
+parser already refuses to produce a parsed reference containing such a
+segment.
+
+**Execution consistency.** A manual run executes the exact ordered step
+snapshot loaded during its own preflight transaction; the orchestration
+loop never re-reads `workflow_steps` mid-run, so a concurrent edit to
+the workflow after the run has started cannot change that run's already
+in-progress sequence or configuration.
+
+**Not implemented**: partial string interpolation, expressions,
+arithmetic, fallback/default values, optional references, reference
+aliases, cross-workflow references, references to a previous run,
+references to project/environment variables, and (per "Not implemented
+by this endpoint" below) any scheduler-driven use of references. Output
+references are intended primarily for cleanup flows within one run
+(create → act → delete), not as a general data-passing mechanism.
 
 **Not implemented by this endpoint**: overlap prevention (nothing stops
 two concurrent manual runs of the same workflow), distributed locks,
-automatic retries, cancellation, timeouts, output references between
-steps, input interpolation, preflight/dry-run validation, and
-run-history read endpoints (`GET` list/detail for past runs). The
-response body of the `POST` call is currently the only way to see a
-run's results.
+automatic retries, cancellation, timeouts, preflight/dry-run validation
+of remote execution outcomes, and run-history read endpoints (`GET`
+list/detail for past runs). The response body of the `POST` call is
+currently the only way to see a run's results.
 
 ## Shared validation package
 
@@ -1051,9 +1200,15 @@ Key exports:
   create-step input (`stepKey`, `enabled?`, `type`, `configuration`),
   validated as one discriminated union so an invalid pairing (e.g.
   `type: 'wait'` with a `read`-shaped `configuration`) is structurally
-  rejected. `stepKey` is trimmed, 1–100 characters, lowercase
-  letters/digits/hyphens/underscores only (whitespace and dots
-  rejected, never silently stripped).
+  rejected. `stepKey` is trimmed, 1–100 characters, **strict snake_case**:
+  `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$` — starts with a lowercase letter,
+  contains only lowercase letters/digits/single underscores between
+  words; hyphens, a leading digit, a leading/trailing underscore, and
+  consecutive underscores are all rejected (never silently stripped or
+  normalized). This is stricter than a "lowercase letters, digits,
+  hyphens, underscores" rule because `stepKey` is also the stable
+  identifier embedded inside other steps' step-output reference strings
+  — see "Output references" under "Workflow Runs API" below.
 
 **`signin` requires Supabase credentials**: its configuration is
 `{ email: string, password: string }` — the specific Supabase user this

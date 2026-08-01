@@ -21,13 +21,21 @@ import type {
  *
  * `inputSnapshot` and `output` are intentionally typed loosely
  * (`Record<string, unknown> | null`), not as a `oneOf` keyed by step
- * type: `inputSnapshot` is a *sanitized* copy of the step's
- * configuration (its shape can differ from the original — `signin`'s
- * `password` becomes the literal string `"[REDACTED]"`, which is not a
- * valid `SigninStepConfiguration`), and `output` is whatever JSON-safe
- * shape the resolved executor happened to return — a `oneOf` here would
- * overstate a guarantee this endpoint doesn't actually make. Both are
- * documented instead through prose and per-executor examples.
+ * type: `inputSnapshot` is a *sanitized, resolved* copy of the step's
+ * configuration — every step-output reference
+ * (`${steps.<step_key>.output.<path>}`) has already been substituted
+ * with its actual value from an earlier step's output before this
+ * snapshot was built, so its shape can differ from the original
+ * persisted `workflow_steps.configuration` in two ways: a resolved
+ * reference (a string in the persisted configuration may become a
+ * number, object, array, etc. here) and `signin`'s `password` becoming
+ * the literal string `"[REDACTED]"` (not a valid
+ * `SigninStepConfiguration`). The persisted workflow-step configuration
+ * itself is never modified — only this separate snapshot reflects the
+ * resolved value. `output` is whatever JSON-safe shape the resolved
+ * executor happened to return — a `oneOf` here would overstate a
+ * guarantee this endpoint doesn't actually make. Both are documented
+ * instead through prose and per-executor examples.
  */
 export class StepRunResponseDto implements StepRunResponse {
   @ApiProperty({ description: 'The step-run ID.' })
@@ -66,7 +74,7 @@ export class StepRunResponseDto implements StepRunResponse {
       'occur through the manual-run endpoint.',
     nullable: true,
     example: {
-      stepKey: 'authenticate-test-user',
+      stepKey: 'authenticate_test_user',
       type: 'signin',
       configuration: {
         email: 'heartbeat-user@example.com',

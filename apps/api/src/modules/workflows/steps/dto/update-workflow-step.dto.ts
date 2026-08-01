@@ -47,8 +47,12 @@ export class UpdateWorkflowStepDto {
   @ApiPropertyOptional({
     description:
       'Stable, machine-friendly identifier for this step within the ' +
-      'workflow (lowercase letters, numbers, hyphens, underscores).',
-    example: 'sign-in',
+      'workflow. Must be snake_case (see `CreateWorkflowStepDto.stepKey` ' +
+      'for the exact rule) and unique within the workflow. Renaming a ' +
+      'step that another enabled step still references by its old key ' +
+      'is rejected with 409 Conflict — existing references are never ' +
+      'rewritten automatically.',
+    example: 'create_record',
   })
   @IsOptional()
   @IsString()
@@ -69,7 +73,8 @@ export class UpdateWorkflowStepDto {
       "alone while the step's existing `type` stays the same, the " +
       'resulting merged pair is validated as a whole. The selected ' +
       'shape below MUST correspond to the (possibly merged) `type`: ' +
-      `${STEP_TYPE_CONFIGURATION_TABLE}.`,
+      `${STEP_TYPE_CONFIGURATION_TABLE}. Any string field may instead ` +
+      'be a step-output reference; see each configuration model.',
     oneOf: STEP_CONFIGURATION_MODELS.map((model) => ({
       $ref: getSchemaPath(model),
     })),
@@ -79,7 +84,11 @@ export class UpdateWorkflowStepDto {
   configuration?: Record<string, unknown>;
 
   @ApiPropertyOptional({
-    description: 'Whether the step is enabled.',
+    description:
+      'Whether the step is enabled. Disabling a step that another ' +
+      'enabled step references is rejected with 409 Conflict; enabling ' +
+      'a step whose own references are no longer valid (an earlier ' +
+      'step was renamed, disabled, or removed) is also rejected.',
     example: true,
   })
   @IsOptional()

@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { and, asc, desc, eq, exists } from 'drizzle-orm';
+import type { JsonValue } from '@supabase-heartbeat/validation';
 import { DatabaseService } from '../../database/database.service';
 import { projects, workflows, workflowSteps } from '../../database/schema';
 import type { Workflow, WorkflowStep } from '../../database/schema/types';
@@ -20,6 +21,7 @@ import type {
   WorkflowResponse,
 } from './workflows.types';
 import type { WorkflowStepResponse } from './steps/workflow-steps.types';
+import { validateWorkflowReferences } from './references/validate-workflow-references';
 
 @Injectable()
 export class WorkflowsService {
@@ -55,6 +57,17 @@ export class WorkflowsService {
    * (metadata, array bounds, duplicate keys, per-step type/configuration
    * pairing) by the DTO's own decorators before this method runs, so the
    * transaction body only needs to assign positions and persist.
+   *
+   * `input.steps` array order **is** the proposed execution order —
+   * `validateWorkflowReferences` runs against it before the transaction
+   * opens, so a workflow with an invalid step-output reference (unknown
+   * key, forward reference, self-reference, disabled-step reference, or
+   * malformed/partial-interpolation syntax) creates neither the workflow
+   * nor any step; nothing is persisted on failure, exactly like the
+   * per-step insert-failure rollback this method already guarantees.
+   * `configuration` is already `JsonValue`-shaped at this point (each
+   * step already passed the shared Zod schema via `IsWorkflowStepArray`
+   * before this method runs).
    */
   async create(
     actor: AuthenticatedActor,
@@ -63,6 +76,14 @@ export class WorkflowsService {
   ): Promise<WorkflowDetailResponse> {
     this.assertCanMutate(actor);
     await this.assertOwnedProject(actor, projectId);
+
+    validateWorkflowReferences(
+      input.steps.map((step) => ({
+        stepKey: step.stepKey,
+        enabled: step.enabled ?? true,
+        configuration: step.configuration as JsonValue,
+      })),
+    );
 
     return this.db.transaction((tx) => {
       const [workflowRow] = tx

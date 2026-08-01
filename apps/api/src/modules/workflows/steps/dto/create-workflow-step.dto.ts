@@ -87,9 +87,18 @@ export class CreateWorkflowStepDto {
   @ApiProperty({
     description:
       'Stable, machine-friendly identifier for this step within the ' +
-      'workflow (lowercase letters, numbers, hyphens, underscores). Used ' +
-      'for the uniqueness constraint and, later, step-output references.',
-    example: 'sign-in',
+      'workflow. Must be snake_case: start with a lowercase letter, ' +
+      'contain only lowercase letters, digits, and single underscores ' +
+      'between words — no hyphens, no leading digit, no leading or ' +
+      'trailing underscore, no consecutive underscores (e.g. ' +
+      '`create_record`, not `Create-Record`). Unique within the ' +
+      'workflow. Used by this same-workflow step-output reference ' +
+      'syntax: `${steps.<step_key>.output.<path>}` — see ' +
+      '`configuration` on `insert`/`update`/`delete`/`invoke_function` ' +
+      'for examples. A step may only reference an earlier, enabled step ' +
+      'by this key; renaming, disabling, or deleting a step that ' +
+      'another enabled step references is rejected.',
+    example: 'create_record',
   })
   @IsString()
   stepKey!: string;
@@ -108,7 +117,9 @@ export class CreateWorkflowStepDto {
       'The step configuration. Its required shape depends on `type` — ' +
       'the selected shape below MUST correspond to `type`: ' +
       `${STEP_TYPE_CONFIGURATION_TABLE}. Submitting a shape that does ` +
-      'not match `type` is rejected with 400 Bad Request.',
+      'not match `type` is rejected with 400 Bad Request. Any string ' +
+      'field may instead be a step-output reference — see each ' +
+      'configuration model for details and examples.',
     oneOf: STEP_CONFIGURATION_MODELS.map((model) => ({
       $ref: getSchemaPath(model),
     })),

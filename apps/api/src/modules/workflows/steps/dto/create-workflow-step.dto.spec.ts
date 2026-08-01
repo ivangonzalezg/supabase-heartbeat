@@ -10,7 +10,7 @@ async function validateInput(input: Record<string, unknown>) {
 describe('CreateWorkflowStepDto', () => {
   it('accepts a valid signin step', async () => {
     const errors = await validateInput({
-      stepKey: 'sign-in',
+      stepKey: 'sign_in',
       type: 'signin',
       configuration: {
         email: 'heartbeat-user@example.com',
@@ -22,7 +22,7 @@ describe('CreateWorkflowStepDto', () => {
 
   it('rejects a signin step with an empty configuration', async () => {
     const errors = await validateInput({
-      stepKey: 'sign-in',
+      stepKey: 'sign_in',
       type: 'signin',
       configuration: {},
     });
@@ -31,7 +31,7 @@ describe('CreateWorkflowStepDto', () => {
 
   it('reports a useful nested path for an invalid signin configuration', async () => {
     const errors = await validateInput({
-      stepKey: 'sign-in',
+      stepKey: 'sign_in',
       type: 'signin',
       configuration: { email: 'heartbeat-user@example.com' },
     });
@@ -45,7 +45,7 @@ describe('CreateWorkflowStepDto', () => {
   it('never includes the submitted password value in a validation error', async () => {
     const secret = 'super-secret-should-not-leak';
     const errors = await validateInput({
-      stepKey: 'sign-in',
+      stepKey: 'sign_in',
       type: 'signin',
       configuration: { email: 'not-an-email', password: secret },
     });

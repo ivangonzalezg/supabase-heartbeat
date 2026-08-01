@@ -6,6 +6,10 @@ import {
 import { InvalidStepExecutionOutputError } from '../../workflow-execution/execution-output/step-execution-output.errors';
 import { UnsupportedPersistedFilterOperatorError } from '../../workflow-execution/filters/unsupported-filter-operator.error';
 import { InvalidPersistedStepConfigurationError } from './executable-step.normalizer';
+import {
+  ResolvedStepConfigurationError,
+  StepReferenceResolutionError,
+} from '../references/workflow-reference.errors';
 
 /**
  * Step identity known at the point a failure is serialized. Optional
@@ -38,6 +42,25 @@ const GENERIC_UNEXPECTED_ERROR_MESSAGE =
  * step identity and fixed strings, never from the rejected output value,
  * the filter's column/value, or any row/request data — confirmed by
  * reading their constructors before adding them here.
+ *
+ * `StepReferenceResolutionError` (a step-output reference's path could
+ * not be resolved against the referenced step's actual runtime output —
+ * a missing property, a missing index, or a dangerous property segment)
+ * and `ResolvedStepConfigurationError` (a reference resolved
+ * successfully, but the resulting configuration no longer satisfies the
+ * step's shared schema) were added for output-reference runtime
+ * resolution: both build their message entirely from step identity, the
+ * referenced step's identity, and the reference's own safe path (e.g.
+ * `rows.0.id`) — never from the referenced output's actual value or the
+ * resolved configuration — confirmed by reading their constructors
+ * before adding them here. The remaining reference errors
+ * (`InvalidStepReferenceSyntaxError`, `ReferencedStepNotFoundError`,
+ * `ForwardStepReferenceError`, `DisabledStepReferenceError`) are
+ * deliberately *not* added: they are only ever thrown during preflight,
+ * before the per-step execution loop (and therefore before this
+ * serializer's step-level `catch` is ever reached) or from a CRUD
+ * service outside this loop entirely — see
+ * `references/workflow-reference.errors.ts`.
  */
 const SAFE_ERROR_TYPES = [
   StepExecutionError,
@@ -45,6 +68,8 @@ const SAFE_ERROR_TYPES = [
   InvalidPersistedStepConfigurationError,
   InvalidStepExecutionOutputError,
   UnsupportedPersistedFilterOperatorError,
+  StepReferenceResolutionError,
+  ResolvedStepConfigurationError,
 ] as const;
 
 function isSafeError(error: unknown): error is Error {

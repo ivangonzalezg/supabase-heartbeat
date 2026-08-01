@@ -19,7 +19,7 @@ function buildStep(
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'invoke-heartbeat-function',
+    stepKey: 'invoke_heartbeat_function',
     type: 'invoke_function',
     position: 0,
     configuration: { functionName: FUNCTION_NAME, ...overrides },

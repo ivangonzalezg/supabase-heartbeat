@@ -24,7 +24,20 @@ import {
   WorkflowStepOrderConflictError,
 } from './workflow-steps.errors';
 import type { WorkflowStepResponse } from './workflow-steps.types';
-import { parseWorkflowStepConfiguration } from '@supabase-heartbeat/validation';
+import {
+  parseWorkflowStepConfiguration,
+  stepKeySchema,
+  type JsonValue,
+} from '@supabase-heartbeat/validation';
+import {
+  validateWorkflowReferences,
+  type WorkflowStepReferenceInput,
+} from '../references/validate-workflow-references';
+import { discoverStepOutputReferences } from '../references/reference-discovery';
+import {
+  ReferencedStepDeletionConflictError,
+  ReferencedStepRenameConflictError,
+} from '../references/workflow-reference.errors';
 
 /**
  * The transaction handle type Drizzle passes into `db.transaction`'s
@@ -87,6 +100,14 @@ export class WorkflowStepsService {
    * insert are atomic with respect to concurrent appends. The unique
    * `(workflow_id, position)` constraint is the final safety net against
    * a race this transaction somehow missed.
+   *
+   * Because append always places the new step last, its references are
+   * validated against the resulting complete ordered workflow (existing
+   * steps, in their current order, followed by the new step) before the
+   * transaction opens — it may reference any enabled existing step, but
+   * no existing step can reference it (that requires a separate update
+   * to the existing step, validated on its own). No temporary/partial
+   * step is ever inserted before this check passes.
    */
   async create(
     actor: AuthenticatedActor,
@@ -109,6 +130,16 @@ export class WorkflowStepsService {
     if (existingWithKey.length > 0) {
       throw new DuplicateStepKeyError();
     }
+
+    const existingSteps = await this.loadOrderedReferenceInputs(workflowId);
+    validateWorkflowReferences([
+      ...existingSteps,
+      {
+        stepKey: input.stepKey,
+        enabled: input.enabled ?? true,
+        configuration: input.configuration as JsonValue,
+      },
+    ]);
 
     const row = this.db.transaction((tx) => {
       const [{ nextPosition }] = tx
@@ -147,6 +178,23 @@ export class WorkflowStepsService {
    * from `wait` to `signout` while the old `wait`-shaped configuration
    * still applies is rejected unless a valid `signout` configuration is
    * supplied in the same patch.
+   *
+   * If `stepKey` changes, the new value is validated against the shared
+   * `stepKeySchema` format (the create path already enforces this via
+   * `IsWorkflowStepInput`; this is the update path's equivalent check,
+   * since `UpdateWorkflowStepDto.stepKey` itself only carries `@IsString()`).
+   *
+   * After the merge, the resulting complete ordered workflow (every
+   * other step unchanged, this one replaced by the merged result) is
+   * validated as a whole via `validateWorkflowReferences` — so renaming
+   * a step still referenced by its old key, disabling a step another
+   * enabled step depends on, or enabling a step whose own references are
+   * now invalid, are all rejected atomically before anything is written.
+   * A rename that would break an existing consumer is additionally
+   * pre-checked to raise the more specific
+   * `ReferencedStepRenameConflictError` (naming the actual consumer)
+   * rather than the generic `ReferencedStepNotFoundError` the general
+   * validator would otherwise raise from the consumer's own perspective.
    */
   async update(
     actor: AuthenticatedActor,
@@ -180,20 +228,67 @@ export class WorkflowStepsService {
       );
     }
 
-    if (input.stepKey !== undefined && input.stepKey !== current.stepKey) {
+    const keyIsChanging =
+      input.stepKey !== undefined && input.stepKey !== current.stepKey;
+
+    if (keyIsChanging) {
+      const keyFormat = stepKeySchema.safeParse(input.stepKey);
+      if (!keyFormat.success) {
+        const [firstIssue] = keyFormat.error.issues;
+        throw new BadRequestException(
+          `Invalid stepKey: ${firstIssue?.message ?? 'must be snake_case'}`,
+        );
+      }
+
       const existingWithKey = await this.db
         .select({ id: workflowSteps.id })
         .from(workflowSteps)
         .where(
           and(
             eq(workflowSteps.workflowId, workflowId),
-            eq(workflowSteps.stepKey, input.stepKey),
+            eq(workflowSteps.stepKey, input.stepKey!),
           ),
         );
       if (existingWithKey.length > 0) {
         throw new DuplicateStepKeyError();
       }
     }
+
+    const mergedEnabled = input.enabled ?? current.enabled;
+    const existingSteps = await this.loadOrderedReferenceInputs(workflowId);
+
+    if (keyIsChanging) {
+      const referencingStep = existingSteps.find(
+        (step) =>
+          step.id !== current.id &&
+          step.enabled &&
+          discoverStepOutputReferences(step.configuration).references.some(
+            (discovered) => discovered.reference.stepKey === current.stepKey,
+          ),
+      );
+      if (referencingStep) {
+        throw new ReferencedStepRenameConflictError({
+          stepKey: current.stepKey,
+          referencingStepKey: referencingStep.stepKey,
+        });
+      }
+    }
+
+    validateWorkflowReferences(
+      existingSteps.map((step) =>
+        step.id === current.id
+          ? {
+              stepKey: input.stepKey ?? current.stepKey,
+              enabled: mergedEnabled,
+              configuration: parsed.data.configuration,
+            }
+          : {
+              stepKey: step.stepKey,
+              enabled: step.enabled,
+              configuration: step.configuration,
+            },
+      ),
+    );
 
     const [row] = await this.db
       .update(workflowSteps)
@@ -243,7 +338,7 @@ export class WorkflowStepsService {
   ): Promise<void> {
     this.assertCanMutate(actor);
     await this.assertOwnedWorkflow(actor, projectId, workflowId);
-    await this.findOwnedStep(workflowId, stepId);
+    const target = await this.findOwnedStep(workflowId, stepId);
 
     const totalSteps = await this.db
       .select({ id: workflowSteps.id })
@@ -251,6 +346,22 @@ export class WorkflowStepsService {
       .where(eq(workflowSteps.workflowId, workflowId));
     if (totalSteps.length <= 1) {
       throw new LastStepDeletionError();
+    }
+
+    const existingSteps = await this.loadOrderedReferenceInputs(workflowId);
+    const referencingStep = existingSteps.find(
+      (step) =>
+        step.id !== target.id &&
+        step.enabled &&
+        discoverStepOutputReferences(step.configuration).references.some(
+          (discovered) => discovered.reference.stepKey === target.stepKey,
+        ),
+    );
+    if (referencingStep) {
+      throw new ReferencedStepDeletionConflictError({
+        stepKey: target.stepKey,
+        referencingStepKey: referencingStep.stepKey,
+      });
     }
 
     this.db.transaction((tx) => {
@@ -316,6 +427,24 @@ export class WorkflowStepsService {
       if (!sameSize || !sameMembers) {
         throw new WorkflowStepOrderConflictError();
       }
+
+      // Validate references against the *proposed* order before writing
+      // any temporary position — a reorder that would turn a valid
+      // earlier-step reference into a forward reference is rejected here
+      // and the original order/timestamps are left completely untouched
+      // (this `throw` unwinds the transaction; no partial reorder is
+      // ever possible).
+      const stepById = new Map(current.map((step) => [step.id, step]));
+      validateWorkflowReferences(
+        input.stepIds.map((id) => {
+          const step = stepById.get(id)!;
+          return {
+            stepKey: step.stepKey,
+            enabled: step.enabled,
+            configuration: step.configuration as JsonValue,
+          };
+        }),
+      );
 
       applyContiguousPositions(tx, workflowId, input.stepIds);
 
@@ -412,6 +541,31 @@ export class WorkflowStepsService {
         'Only admins may create, update, or delete workflow steps.',
       );
     }
+  }
+
+  /**
+   * Loads a workflow's current steps, in execution order, in the shape
+   * `validateWorkflowReferences` needs — plus each step's own `id`, so
+   * callers (`update`/`delete`) can identify and exclude "the step being
+   * changed" when scanning for an existing consumer. Read-only; never
+   * used inside a mutation's own transaction (those re-read under `tx`
+   * for atomicity, see `reorder`).
+   */
+  private async loadOrderedReferenceInputs(
+    workflowId: string,
+  ): Promise<Array<WorkflowStepReferenceInput & { id: string }>> {
+    const rows = await this.db
+      .select()
+      .from(workflowSteps)
+      .where(eq(workflowSteps.workflowId, workflowId))
+      .orderBy(asc(workflowSteps.position));
+
+    return rows.map((row) => ({
+      id: row.id,
+      stepKey: row.stepKey,
+      enabled: row.enabled,
+      configuration: row.configuration as JsonValue,
+    }));
   }
 }
 

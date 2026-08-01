@@ -24,7 +24,7 @@ function buildStep(
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'delete-heartbeat-row',
+    stepKey: 'delete_heartbeat_row',
     type: 'delete',
     position: 0,
     configuration: { table: TABLE, filter: FILTER, ...overrides },

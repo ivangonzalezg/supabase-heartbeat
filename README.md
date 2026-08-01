@@ -9,7 +9,9 @@ and ownership-scoped Projects and Workflows APIs). Workflows are created
 together with their complete ordered step list transactionally, and
 steps can be managed afterward through a dedicated, ownership-protected
 API. A workflow's enabled steps can be executed manually and
-synchronously via a dedicated endpoint; scheduled/cron-triggered
+synchronously via a dedicated endpoint, and a step's configuration can
+reference an earlier enabled step's output
+(`${steps.<step_key>.output.<path>}`); scheduled/cron-triggered
 execution is not implemented yet — see the
 [API README](apps/api/README.md) for the exact current scope.
 

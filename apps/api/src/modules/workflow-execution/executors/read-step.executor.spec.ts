@@ -15,7 +15,7 @@ function buildStep(
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'read-records',
+    stepKey: 'read_records',
     type: 'read',
     position: 0,
     configuration: { table: TABLE, columns: '*', ...overrides },

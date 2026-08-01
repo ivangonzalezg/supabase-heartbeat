@@ -17,7 +17,7 @@ function buildStep(): ExecutableWorkflowStep<'signin'> {
   return {
     id: 'step-1',
     workflowId: 'workflow-1',
-    stepKey: 'authenticate-user',
+    stepKey: 'authenticate_user',
     type: 'signin',
     position: 0,
     configuration: { email: SUBMITTED_EMAIL, password: SUBMITTED_PASSWORD },
@@ -168,7 +168,7 @@ describe('SigninStepExecutor', () => {
     const context = buildContext(signInWithPassword);
 
     await expect(executor.execute(context, buildStep())).rejects.toThrow(
-      /authenticate-user/,
+      /authenticate_user/,
     );
   });
 

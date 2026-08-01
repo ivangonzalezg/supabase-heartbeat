@@ -15,7 +15,7 @@ function buildSession(role: 'admin' | 'viewer'): UserSession {
 const sampleStep: WorkflowStepResponse = {
   id: 'step-1',
   workflowId: 'workflow-1',
-  stepKey: 'sign-in',
+  stepKey: 'sign_in',
   type: 'signin',
   position: 0,
   configuration: {},
@@ -69,7 +69,7 @@ describe('WorkflowStepsController', () => {
   it('create() delegates to the service with the actor, project ID, workflow ID, and input', async () => {
     mockWorkflowStepsService.create.mockResolvedValue(sampleStep);
     const input = {
-      stepKey: 'sign-in',
+      stepKey: 'sign_in',
       type: 'signin' as const,
       configuration: {},
     };

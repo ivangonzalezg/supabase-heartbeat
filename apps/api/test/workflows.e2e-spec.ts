@@ -116,7 +116,7 @@ describe('Workflows API (e2e)', () => {
     name: 'Nightly heartbeat',
     cronExpression: '0 */6 * * *',
     timezone: 'UTC',
-    steps: [{ stepKey: 'wait-1', type: 'wait', configuration: { seconds: 5 } }],
+    steps: [{ stepKey: 'wait_1', type: 'wait', configuration: { seconds: 5 } }],
   };
 
   it('rejects unauthenticated requests to every workflow endpoint', async () => {
@@ -394,7 +394,7 @@ describe('Workflows API (e2e)', () => {
       .values({
         id: crypto.randomUUID(),
         workflowId,
-        stepKey: 'step-2',
+        stepKey: 'step_2',
         type: 'wait',
         position: 1,
         configuration: {},
@@ -1217,7 +1217,7 @@ describe('Workflows API (e2e)', () => {
           timezone: 'UTC',
           steps: [
             {
-              stepKey: 'sign-in',
+              stepKey: 'sign_in',
               type: 'signin',
               configuration: {
                 email: 'heartbeat-user@example.com',
@@ -1253,7 +1253,7 @@ describe('Workflows API (e2e)', () => {
           name: 'Signin workflow',
           cronExpression: '0 * * * *',
           timezone: 'UTC',
-          steps: [{ stepKey: 'sign-in', type: 'signin', configuration: {} }],
+          steps: [{ stepKey: 'sign_in', type: 'signin', configuration: {} }],
         })
         .expect(400);
     });
@@ -1275,7 +1275,7 @@ describe('Workflows API (e2e)', () => {
           timezone: 'UTC',
           steps: [
             {
-              stepKey: 'sign-in',
+              stepKey: 'sign_in',
               type: 'signin',
               configuration: { email: 'heartbeat-user@example.com' },
             },
@@ -1306,7 +1306,7 @@ describe('Workflows API (e2e)', () => {
         .post(`/api/projects/${projectId}/workflows/${workflowId}/steps`)
         .set('Cookie', admin.cookie)
         .send({
-          stepKey: 'sign-in',
+          stepKey: 'sign_in',
           type: 'signin',
           configuration: {
             email: 'heartbeat-user@example.com',
@@ -1342,7 +1342,7 @@ describe('Workflows API (e2e)', () => {
           timezone: 'UTC',
           steps: [
             {
-              stepKey: 'sign-in',
+              stepKey: 'sign_in',
               type: 'signin',
               configuration: {
                 email: 'heartbeat-user@example.com',
@@ -1457,7 +1457,7 @@ describe('Workflows API (e2e)', () => {
           timezone: 'UTC',
           steps: [
             {
-              stepKey: 'sign-in',
+              stepKey: 'sign_in',
               type: 'signin',
               configuration: { email: 'not-an-email', password: secret },
             },

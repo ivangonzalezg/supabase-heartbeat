@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { and, asc, eq, exists } from 'drizzle-orm';
+import type { JsonValue } from '@supabase-heartbeat/validation';
 import { DatabaseService } from '../../../database/database.service';
 import {
   projects,
@@ -24,7 +25,12 @@ import {
   buildWorkflowRunFailureMessage,
   serializeExecutionError,
 } from './execution-error-serializer';
-import { toExecutableWorkflowStep } from './executable-step.normalizer';
+import {
+  assertPersistedStepConfigurationIsValid,
+  toExecutableWorkflowStep,
+} from './executable-step.normalizer';
+import { validateWorkflowReferences } from '../references/validate-workflow-references';
+import { resolveStepReferences } from '../references/resolve-step-references';
 import type {
   StepRunResponse,
   WorkflowRunDetailResponse,
@@ -86,17 +92,72 @@ export class WorkflowRunsService {
 
     const enabledSteps = orderedSteps.filter((step) => step.enabled);
 
+    // Run-local output store: scoped to exactly this `executeManual`
+    // call (a plain local variable, not a class field), so two
+    // concurrent runs — on this same singleton service instance — never
+    // share state, and nothing here is ever persisted as a separate
+    // database field or reused across runs. Populated only after a
+    // step's success has already been persisted (see the loop below),
+    // so a later step can never observe an output whose step run was
+    // not actually committed as successful.
+    const outputs = new Map<string, JsonValue>();
+
     const stepRunResponses: StepRunResponse[] = [];
     let failureMessage: string | null = null;
 
     for (const step of enabledSteps) {
-      const stepRunRow = await this.createStepRun(workflowRunId, step);
+      // Resolution happens *before* the step_run row is created, so the
+      // persisted `inputSnapshot` reflects the configuration actually
+      // used for execution (references already substituted), never the
+      // unresolved template — matching this task's resolved-snapshot
+      // requirement. If resolution or revalidation itself fails (e.g. a
+      // missing runtime output path, or a resolved value that no longer
+      // satisfies the step's schema), the step_run row is still created
+      // — with a snapshot built from the *original persisted*
+      // configuration, since no resolved value exists in that case —
+      // so every attempted enabled step still gets exactly one row,
+      // matching this service's existing contract.
+      let resolvedConfiguration: JsonValue;
+      try {
+        assertPersistedStepConfigurationIsValid(step);
+        resolvedConfiguration = resolveStepReferences(
+          step.stepKey,
+          step.configuration as JsonValue,
+          outputs,
+        );
+      } catch (error) {
+        const serialized = serializeExecutionError(error, {
+          stepKey: step.stepKey,
+          stepType: step.type,
+        });
+        const stepRunRow = await this.createStepRun(
+          workflowRunId,
+          step,
+          step.configuration as JsonValue,
+        );
+        stepRunResponses.push(
+          await this.finalizeStepRunFailure(stepRunRow.id, serialized),
+        );
+        failureMessage = buildWorkflowRunFailureMessage(serialized);
+        break;
+      }
+
+      const stepRunRow = await this.createStepRun(
+        workflowRunId,
+        step,
+        resolvedConfiguration,
+      );
 
       try {
-        const output = await this.executeStep(context, step);
+        const output = await this.executeStep(
+          context,
+          step,
+          resolvedConfiguration,
+        );
         stepRunResponses.push(
           await this.finalizeStepRunSuccess(stepRunRow.id, output),
         );
+        outputs.set(step.stepKey, (output ?? null) as JsonValue);
       } catch (error) {
         const serialized = serializeExecutionError(error, {
           stepKey: step.stepKey,
@@ -193,6 +254,25 @@ export class WorkflowRunsService {
         .orderBy(asc(workflowSteps.position))
         .all();
 
+      // Preflight: validate every enabled step's step-output references
+      // structurally *before* the run row is inserted — a workflow with
+      // an invalid reference (unknown/forward/self/disabled-step
+      // reference, or malformed/partial-interpolation syntax) creates
+      // no run at all. Pure and synchronous (no `await`, no I/O beyond
+      // the already-loaded `orderedSteps`), so it is safe to run inside
+      // this synchronous `better-sqlite3` transaction. This does not
+      // attempt to prove a reference's *path* will resolve against
+      // future runtime output data — that is checked per step, at
+      // execution time, by the runtime resolver (see `executeStep`
+      // below), since it depends on data this preflight cannot know.
+      validateWorkflowReferences(
+        orderedSteps.map((step) => ({
+          stepKey: step.stepKey,
+          enabled: step.enabled,
+          configuration: step.configuration as JsonValue,
+        })),
+      );
+
       const startedAt = new Date();
       const [runRow] = tx
         .insert(workflowRuns)
@@ -216,24 +296,38 @@ export class WorkflowRunsService {
     });
   }
 
-  /** Resolves the executor for `step.type` and invokes it. May throw
-   * `StepExecutorNotFoundError` (unimplemented type),
-   * `InvalidPersistedStepConfigurationError` (legacy/corrupted data), a
+  /** Resolves the executor for `step.type` and invokes it with the
+   * already-resolved configuration. May throw `StepExecutorNotFoundError`
+   * (unimplemented type), `ResolvedStepConfigurationError` (the resolved
+   * configuration no longer satisfies the step's schema), a
    * `StepExecutionError` (executor-reported failure), or an unexpected
    * exception — all handled uniformly by the caller's try/catch. */
   private async executeStep(
     context: WorkflowExecutionContext,
     stepRow: WorkflowStep,
+    resolvedConfiguration: JsonValue,
   ): Promise<Record<string, unknown> | null> {
-    const executableStep = toExecutableWorkflowStep(stepRow);
+    const executableStep = toExecutableWorkflowStep(
+      stepRow,
+      resolvedConfiguration,
+    );
     const executor = this.stepExecutorRegistry.get(stepRow.type);
     const result = await executor.execute(context, executableStep);
     return normalizeOutputForPersistence(result.output);
   }
 
+  /**
+   * `inputSnapshot` is built from `resolvedConfiguration` — the
+   * configuration actually used for execution, with every reference
+   * already substituted — never the unresolved persisted template. The
+   * persisted `workflow_steps.configuration` row itself is never
+   * modified; only this separate `step_runs` snapshot reflects the
+   * resolved value (see `apps/api/README.md`, "Output references").
+   */
   private async createStepRun(
     workflowRunId: string,
     step: WorkflowStep,
+    resolvedConfiguration: JsonValue,
   ): Promise<{ id: string }> {
     const [row] = await this.db
       .insert(stepRuns)
@@ -243,7 +337,11 @@ export class WorkflowRunsService {
         workflowStepId: step.id,
         position: step.position,
         status: 'running',
-        inputSnapshot: buildStepInputSnapshot(step),
+        inputSnapshot: buildStepInputSnapshot({
+          stepKey: step.stepKey,
+          type: step.type,
+          configuration: resolvedConfiguration as Record<string, unknown>,
+        }),
         startedAt: new Date(),
       })
       .returning();
