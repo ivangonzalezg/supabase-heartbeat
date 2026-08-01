@@ -29,7 +29,10 @@ export function attachViteDevProxy(app: INestApplication): void {
         }
       },
     },
-    pathFilter: ['**', '!/api/**'],
+    // Path-based glob matching (e.g. '**') ignores dotfile segments by
+    // default, which would silently skip Vite's `.vite/deps/*` cache
+    // requests. A predicate avoids that pitfall entirely.
+    pathFilter: (pathname) => !pathname.startsWith('/api/'),
   });
 
   const expressApp = app.getHttpAdapter().getInstance() as Express;
