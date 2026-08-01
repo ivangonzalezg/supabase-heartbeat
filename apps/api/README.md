@@ -714,19 +714,21 @@ complete-list requirement.
 ## Workflow execution foundation
 
 `src/modules/workflow-execution/` (`WorkflowExecutionModule`) is the
-internal architecture for executing workflow steps. **This is a
-foundation only**: there is no workflow-run orchestration loop, no
-`workflow_runs`/`step_runs` persistence, no manual-run HTTP endpoint,
-and no scheduler integration yet. Nothing in this module is reachable
-from an HTTP route — it has no controller.
+internal architecture for executing workflow steps: the `StepExecutor`
+contract, the executor registry, and the per-run execution context.
+Actual run orchestration (creating `workflow_runs`/`step_runs`, the
+manual-run HTTP endpoint) lives in `src/modules/workflows/runs/` and is
+documented below in "Workflow Runs API". There is still no scheduler
+integration and no cron-triggered execution — only manual execution via
+that endpoint exists today.
 
-**One Supabase client per future workflow run.** A future workflow
-engine will call `WorkflowExecutionContextFactory.create({ projectId,
-workflowId, supabaseUrl, publishableKey })` once per run, producing a
+**One Supabase client per workflow run.** `WorkflowRunsService` calls
+`WorkflowExecutionContextFactory.create({ projectId, workflowId,
+supabaseUrl, publishableKey })` exactly once per run, producing a
 `WorkflowExecutionContext` that every step executor invoked during that
 run receives. `supabaseUrl` and `publishableKey` come from the owning
 project (`ProjectsService`, unchanged by this task) — the context
-factory does no database access itself; the engine is responsible for
+factory does no database access itself; the caller is responsible for
 loading the project first. The Supabase client is constructed by
 `SupabaseClientFactory` with backend-appropriate auth options
 (`persistSession: false`, `autoRefreshToken: false`,
@@ -765,12 +767,6 @@ callable `execute`, fails application bootstrap immediately
 (`DuplicateStepExecutorError` / `InvalidStepExecutorProviderError`), not
 later during an eventual workflow run.
 
-**No run persistence is performed by this task.** Executor results
-(`StepExecutionResult.output`) are JSON-safe and shaped to be *safe to
-persist later* in `step_runs.output`, but nothing in this module writes
-to `workflow_runs` or `step_runs` — that belongs to the future workflow
-engine.
-
 **Executor results intentionally exclude credentials and tokens.**
 `signin` returns only `{ authenticated: true, userId }` — never the
 password, access token, refresh token, or full session. `signout`
@@ -791,6 +787,121 @@ the new canonical type, decorate the class with
 automatically on the next application bootstrap, no other registration
 step is needed. There is no external plugin system; only executors
 compiled into this codebase can be registered.
+
+## Workflow Runs API
+
+`POST /api/projects/:projectId/workflows/:workflowId/runs`
+(`src/modules/workflows/runs/`, admin only) is the first, and currently
+only, way to execute a workflow: a synchronous, manually triggered run.
+There is no scheduler, no cron-triggered execution, no background
+worker, and no queue — the HTTP request itself performs the run and the
+connection stays open until it finishes. The response is
+`201 Created` whenever a run record was successfully created and
+completed its execution attempt, **regardless of whether the run itself
+ended in `success` or `failed`** — check `body.status`, not the HTTP
+status code, to know whether the workflow logic succeeded. A `404` or
+`403` means no run was created at all (ownership/role failure before
+execution began); a `5xx` means an unexpected server error, not a
+failed workflow.
+
+**Ownership** is proven through the same hierarchy pattern as the rest
+of the Workflows API (`projects.id = :projectId AND projects.owner_id =
+actor.userId AND workflows.id = :workflowId AND workflows.project_id =
+:projectId`) — a mismatched project or workflow ID returns
+`404 Not Found`, disclosing nothing about which part of the hierarchy
+is wrong.
+
+**Disabled workflows can still be run manually.** `workflows.enabled`
+only controls future scheduled execution (not yet implemented); it has
+no effect on this endpoint. **Only enabled steps execute.** Disabled
+steps are skipped entirely: no `step_run` row is created for them, they
+never cause a failure, and they do not affect the relative execution
+order of the steps around them. A workflow with zero enabled steps
+still produces a successful run with an empty `stepRuns` array.
+
+**Execution order and scope**: enabled steps run sequentially in
+ascending `position` order. Exactly one `WorkflowExecutionContext` (and
+therefore exactly one Supabase client) is created per run and reused by
+every step executor in that run — see "Workflow execution foundation"
+above. There is no implicit `signOut()` at the end of a run; the
+Supabase client is simply discarded. Only an explicit, enabled
+`signout` step ever signs out.
+
+**Stop on first failure.** Any technical failure — an unimplemented
+executor type (`StepExecutorNotFoundError`), an invalid persisted step
+configuration, a Supabase auth/signout error, a network exception, a
+`wait`-provider failure, or any other unexpected exception —
+immediately stops the run. Steps after the failed one are never
+attempted and never get a `step_run` row. There is no continue-on-error
+mode and no retry.
+
+**`workflow_runs` lifecycle**: a row is inserted with `status:
+'running'`, `triggerType: 'manual'`, and `startedAt` set, inside the
+same transaction that verifies ownership and loads the project,
+workflow, and ordered steps. After the step loop finishes (successfully
+or on first failure), the run is updated to a final `status` of
+`'success'` or `'failed'`, with `finishedAt` set and, on failure, a
+safe, human-readable `error` summary (see "Error serialization"
+below). This final update is a best-effort write outside any
+transaction (see "Transaction boundaries" below); if it fails after one
+retry, the run can be left in `'running'` — a known, documented gap,
+since there is no background reconciliation job in this task's scope.
+
+**`step_runs` lifecycle**: for every *attempted* enabled step (in
+executor-resolution order, which matches position order), exactly one
+row is written: created with `status: 'running'` and an `inputSnapshot`
+before the executor runs, then updated in place to either `'success'`
+(with `output`) or `'failed'` (with `error`) once the executor settles.
+A step that is never reached because an earlier step failed gets no row
+at all — the absence of a row, not a `'skipped'` status, is how
+"never attempted" is represented for steps *after* a failure (disabled
+steps use the same "no row" representation, for a different reason —
+see above).
+
+**Transaction boundaries.** Only the run-creation phase — ownership
+verification, loading the project/workflow/ordered steps, and inserting
+the initial `workflow_runs` row — runs inside one Drizzle/SQLite
+transaction (`better-sqlite3` transactions are synchronous, so nothing
+that awaits, including every Supabase call and the `wait` step, can run
+inside one). Each `step_runs` insert/update is its own separate,
+non-transactional write, committed immediately, so a concurrent reader
+can observe a step's result as soon as that step finishes — no lock is
+held for the duration of a run. The final `workflow_runs` status update
+is likewise a separate, non-transactional write.
+
+**Secret-safe persistence**: `inputSnapshot` is a sanitized copy of the
+step's persisted configuration — currently only `signin.password` is
+redacted, to `"[REDACTED]"`; every other field is copied as-is (see
+`execution-snapshot.ts`). `output` is exactly the executor's
+`StepExecutionResult.output`, which is already designed to exclude
+credentials and tokens (see "Workflow execution foundation" above — a
+`signin` step's output is `{ authenticated: true, userId }`, never a
+password, access token, or session). **Error serialization** uses an
+explicit allowlist, not a blanket pass-through: only errors of a
+recognized, individually audited internal type — `StepExecutionError`
+(persisted as its own safe `.message` verbatim), `StepExecutorNotFoundError`,
+and `InvalidPersistedStepConfigurationError` — ever have their
+`.message` read at all. Every other thrown value — an unrecognized
+`Error` subclass, a plain `Error` from an unanticipated SDK exception,
+or a non-Error thrown value — is reduced to a fixed, generic sentence,
+`Step "<key>" (<type>) failed: An unexpected execution error occurred.`
+(or `Workflow run failed: An unexpected execution error occurred.` for
+the run-level summary), because an arbitrary error's message, stack,
+enumerable properties, or `cause` chain could otherwise carry a
+credential, token, or request payload straight into persisted/returned
+data. The three built-in executors (`signin`, `signout`, `wait`)
+already wrap their own failures into a safe `StepExecutionError` before
+they ever reach this layer — the allowlist is defense-in-depth for a
+future or third-party executor that does not (see
+`execution-error-serializer.ts`).
+
+**Not implemented by this endpoint**: overlap prevention (nothing stops
+two concurrent manual runs of the same workflow), distributed locks,
+automatic retries, cancellation, timeouts, output references between
+steps, input interpolation, preflight/dry-run validation, and
+run-history read endpoints (`GET` list/detail for past runs). The
+response body of the `POST` call is currently the only way to see a
+run's results.
 
 ## Shared validation package
 
@@ -999,10 +1110,12 @@ PUT    /api/projects/:projectId/workflows/:workflowId/steps/order         # Repl
 GET    /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Read a step
 PATCH  /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Partially update a step, excluding position (admin only)
 DELETE /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Delete a step and compact positions (admin only)
+POST   /api/projects/:projectId/workflows/:workflowId/runs                # Synchronously execute a workflow's enabled steps in order (admin only)
 ```
 
-See "Projects API", "Workflows API", and "Workflow Steps API" above for
-authentication, role, and ownership-scoping details.
+See "Projects API", "Workflows API", "Workflow Steps API", and
+"Workflow Runs API" above for authentication, role, and
+ownership-scoping details.
 
 ## API documentation
 

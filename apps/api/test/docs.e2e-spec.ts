@@ -304,16 +304,26 @@ describe('API documentation (e2e)', () => {
     });
   });
 
-  it('exposes no workflow-execution route: WorkflowExecutionModule adds no controller yet', async () => {
+  it('documents the manual workflow-run endpoint, but no scheduler route', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/openapi.json')
       .expect(200);
     const document = response.body as OpenAPIDocument;
     const pathKeys = Object.keys(document.paths);
 
-    const executionRelatedPaths = pathKeys.filter((path) =>
-      /execut|\/run(s)?(\/|$)/i.test(path),
+    // The manual-run endpoint (added in a later task than the
+    // execution-foundation module this file originally documented) is
+    // expected to exist now — see workflow-runs.e2e-spec.ts for its full
+    // coverage. What remains true, and is asserted here, is that no
+    // scheduler-specific route has been added: manual execution is the
+    // only trigger implemented so far.
+    expect(document.paths).toHaveProperty(
+      '/api/projects/{projectId}/workflows/{workflowId}/runs',
     );
-    expect(executionRelatedPaths).toEqual([]);
+
+    const schedulerLikePaths = pathKeys.filter((path) =>
+      /schedule|cron-trigger|scheduler/i.test(path),
+    );
+    expect(schedulerLikePaths).toEqual([]);
   });
 });
