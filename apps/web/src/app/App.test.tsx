@@ -105,7 +105,7 @@ describe("App", () => {
     render(<App />)
 
     expect(
-      screen.getByText("Signed in as admin@example.com.")
+      screen.getByText("Signed in as Admin (admin@example.com).")
     ).toBeInTheDocument()
 
     await userEvent
