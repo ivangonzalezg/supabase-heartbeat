@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img"
+  aria-labelledby="title desc">
+  <title id="title">Favicon 32</title>
+  <desc id="desc">Favicon 32 px</desc>
+
+  <rect width="32" height="32" rx="6" fill="#FFFFFF" />
+  <g fill="#0F766E">
+    <circle cx="5.21" cy="16.00" r="1.37" />
+    <rect x="9.32" y="12.23" width="2.40" height="7.54" rx="1.20" />
+    <rect x="14.46" y="8.46" width="2.88" height="15.07" rx="1.44" />
+    <rect x="20.28" y="12.23" width="2.40" height="7.54" rx="1.20" />
+    <circle cx="26.79" cy="16.00" r="1.37" />
+  </g>
+
+</svg>

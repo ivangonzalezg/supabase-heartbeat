@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="267" viewBox="0 0 260 267" role="img"
+  aria-labelledby="title desc">
+  <title id="title">Vertical logo</title>
+  <desc id="desc">Vertical logo with isotype on top</desc>
+
+  <g fill="#0F766E">
+    <circle cx="35.00" cy="66.00" r="12.00" />
+    <rect x="65.00" y="33.00" width="22.00" height="66.00" rx="10" />
+    <rect x="117.00" y="0" width="26" height="132.00" rx="12" />
+    <rect x="173.00" y="33.00" width="22.00" height="66.00" rx="10" />
+    <circle cx="225.00" cy="66.00" r="12.00" />
+  </g>
+  <text x="13" y="192" font-family="Inter, Arial, Helvetica, sans-serif" font-size="54" font-weight="400" fill="#0F172A"
+    letter-spacing="-1">Supabase</text>
+  <text x="0" y="264" font-family="Inter, Arial, Helvetica, sans-serif" font-size="58" font-weight="700" fill="#0F172A"
+    letter-spacing="-1">Heartbeat</text>
+</svg>
