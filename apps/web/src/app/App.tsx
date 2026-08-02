@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react"
 import { Button } from "@/shared/ui"
+import { useEffect, useState } from "react"
+import { useSessionContext } from "@/entities/session"
+import { SignInForm } from "@/features/sign-in"
 
 type ApiStatus = "Loading" | "API online" | "API unavailable"
 
 export function App() {
+  const { status, user, signOut } = useSessionContext()
   const [apiStatus, setApiStatus] = useState<ApiStatus>("Loading")
 
   useEffect(() => {
@@ -39,14 +42,39 @@ export function App() {
     }
   }, [])
 
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-svh items-center justify-center p-6 text-sm">
+        Loading...
+      </div>
+    )
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <div className="flex min-h-svh items-center justify-center p-6">
+        <SignInForm />
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-svh p-6">
       <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
         <div>
           <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
+          <p>
+            Signed in as {user?.name} ({user?.email}).
+          </p>
           <p>We&apos;ve already added the button component for you.</p>
           <Button className="mt-2">Button</Button>
+          <Button
+            variant="outline"
+            className="mt-2 ml-2"
+            onClick={() => void signOut()}
+          >
+            Sign out
+          </Button>
         </div>
         <p>{apiStatus}</p>
         <div className="font-mono text-xs text-muted-foreground">

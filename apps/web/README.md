@@ -114,6 +114,18 @@ components via the barrel, not a component file directly:
 import { Button } from "@/shared/ui"
 ```
 
+**Before hand-writing any UI markup** — inside a screen, a feature, or a
+shared component — check in this order:
+
+1. `src/shared/ui/` for a component that already does the job.
+2. The shadcn MCP tools (`search_items_in_registries`,
+   `view_items_in_registries`) for a matching registry component.
+
+Only fall back to raw markup (`<input>`, `<label>`, custom one-off
+elements) when no shadcn component fits. If a shadcn component is found,
+install it (`npx shadcn@latest add <component>`) and use it instead of
+writing custom markup.
+
 ## Path aliases
 
 `tsconfig.json`, `tsconfig.app.json`, and `vite.config.ts` all define the
@@ -196,9 +208,15 @@ made blind:
 * Colocate component tests with their components.
 * Do not import API database models/schema into frontend code.
 * Do not add a router or state-management/data-fetching library without an
-  explicit task to do so. UI components are added through shadcn/ui as
-  needed.
+  explicit task to do so. UI components are added through shadcn/ui — see
+  "UI components (shadcn/ui)" above for the required check-first flow.
 * Respect FSD layer boundaries; let `steiger` catch violations rather than
   relying on manual review alone.
+* File names use kebab-case (`session-provider.tsx`, `sign-in-form.tsx`,
+  including `.test.tsx` files). Exported component identifiers stay
+  PascalCase per React convention — only the file name changes.
+  `App.tsx`/`App.test.tsx` at the composition root are the sole
+  documented exception, kept as-is because it's Vite's own scaffold
+  convention.
 * Update this README whenever frontend commands, architecture, environment
   behavior, or testing conventions change.

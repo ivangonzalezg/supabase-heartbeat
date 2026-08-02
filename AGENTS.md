@@ -146,13 +146,27 @@ explicitly requested.
 * Colocate component tests with their components.
 * Use semantic React Testing Library queries (`getByRole`, `getByText`)
   over test IDs.
-* Do not add a router, state-management library, UI component library, or
-  data-fetching library without an explicit task to do so.
+* Do not add a router or a state-management/data-fetching library without
+  an explicit task to do so. UI components are added through shadcn/ui as
+  needed (see the component rule below).
 * Do not import API database schema/models directly into frontend code.
+* File names use kebab-case (`session-provider.tsx`, `sign-in-form.tsx`),
+  including test files (`sign-in-form.test.tsx`). Exported component
+  identifiers still use PascalCase per React convention — only the file
+  name changes. `App.tsx`/`App.test.tsx` at the composition root are the
+  sole documented exception (Vite's own scaffold convention).
+* Before building any UI component — inside a screen or as a shared
+  piece — check in this order: (1) `apps/web/src/shared/ui/` for an
+  existing component, (2) the shadcn MCP tools
+  (`search_items_in_registries`, `view_items_in_registries`) for a
+  matching registry component. Only hand-write custom markup (e.g. raw
+  `<input>`/`<label>`) when no shadcn component fits. When a shadcn
+  component is found, install and use it instead of hand-rolled markup.
 
-Feature-Sliced Design (or any other layered frontend architecture) is not
-mandatory — it has not been adopted in this repository. Do not assume or
-introduce it without an explicit task.
+`apps/web/src` follows Feature-Sliced Design (`app/`, `pages/`,
+`widgets/`, `features/`, `entities/`, `shared/`), enforced by `steiger`
+(`apps/web/steiger.config.ts`). See `apps/web/README.md` for the layer
+breakdown and shadcn alias configuration.
 
 ## Tests and validation
 
