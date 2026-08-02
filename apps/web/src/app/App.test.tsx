@@ -89,6 +89,7 @@ describe("App", () => {
 
     render(<App />)
 
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
   })
 

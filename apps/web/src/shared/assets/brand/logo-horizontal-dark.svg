@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="936" height="132" viewBox="0 0 936 132" role="img"
+<svg xmlns="http://www.w3.org/2000/svg" width="957" height="132" viewBox="0 0 957 132" role="img"
   aria-labelledby="title desc">
   <title id="title">Horizontal logo dark</title>
   <desc id="desc">Primary horizontal logo</desc>
@@ -11,9 +11,9 @@
     <circle cx="202.00" cy="66.00" r="12.00" />
   </g>
 
-  <text x="240" y="90" font-family="Inter, Arial, Helvetica, sans-serif" font-size="76" font-weight="400" fill="#FFFFFF"
+  <text x="253" y="90" font-family="Inter, Arial, Helvetica, sans-serif" font-size="76" font-weight="400" fill="#FFFFFF"
     letter-spacing="-1">Supabase</text>
-  <text x="594" y="90" font-family="Inter, Arial, Helvetica, sans-serif" font-size="76" font-weight="700" fill="#FFFFFF"
+  <text x="607" y="90" font-family="Inter, Arial, Helvetica, sans-serif" font-size="76" font-weight="700" fill="#FFFFFF"
     letter-spacing="-1">Heartbeat</text>
 
 </svg>

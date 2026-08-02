@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="582" height="132" viewBox="0 0 582 132" role="img"
+<svg xmlns="http://www.w3.org/2000/svg" width="603" height="132" viewBox="0 0 603 132" role="img"
   aria-labelledby="title desc">
   <title id="title">Compact logo</title>
   <desc id="desc">Isotype plus short "Heartbeat" wordmark</desc>
@@ -10,6 +10,6 @@
     <rect x="150.00" y="33.00" width="22.00" height="66.00" rx="10" />
     <circle cx="202.00" cy="66.00" r="12.00" />
   </g>
-  <text x="240" y="90" font-family="Inter, Arial, Helvetica, sans-serif" font-size="76" font-weight="700" fill="#0F766E"
+  <text x="253" y="90" font-family="Inter, Arial, Helvetica, sans-serif" font-size="76" font-weight="700" fill="#0F766E"
     letter-spacing="-1">Heartbeat</text>
 </svg>

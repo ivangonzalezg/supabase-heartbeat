@@ -25,6 +25,8 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-destructive-subtle: var(--destructive-subtle);
+    --color-destructive-subtle-foreground: var(--destructive-subtle-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -80,6 +82,10 @@
     --destructive: oklch(0.5771 0.2152 27.325);
     /* Missing DS token (destructive-on-solid): keeping prior project value as placeholder. */
     --destructive-foreground: oklch(0.979 0.021 166.113);
+    /* design-tokens.json: danger-subtle/light */
+    --destructive-subtle: oklch(0.9356 0.0309 17.717);
+    /* design-tokens.json: danger-foreground/light */
+    --destructive-subtle-foreground: oklch(0.4437 0.1613 26.899);
     /* design-tokens.json: border/light (also used for input, no separate token) */
     --border: oklch(0.9288 0.0126 255.508);
     --input: oklch(0.9288 0.0126 255.508);
@@ -146,6 +152,10 @@
     --destructive: oklch(0.7106 0.1661 22.216);
     /* Missing DS token (destructive-on-solid): keeping prior project value as placeholder. */
     --destructive-foreground: oklch(0.979 0.021 166.113);
+    /* design-tokens.json: danger-subtle/dark */
+    --destructive-subtle: oklch(0.3958 0.1331 25.723);
+    /* design-tokens.json: danger-foreground/dark */
+    --destructive-subtle-foreground: oklch(0.9356 0.0309 17.717);
     /* design-tokens.json: border/dark (also used for input, no separate token) */
     --border: oklch(0.3224 0.0421 258.303);
     --input: oklch(0.3224 0.0421 258.303);

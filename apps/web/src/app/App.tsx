@@ -1,7 +1,7 @@
 import { Button } from "@/shared/ui"
 import { useEffect, useState } from "react"
 import { useSessionContext } from "@/entities/session"
-import { SignInForm } from "@/features/sign-in"
+import { SignInPage } from "@/pages/sign-in"
 
 type ApiStatus = "Loading" | "API online" | "API unavailable"
 
@@ -51,11 +51,7 @@ export function App() {
   }
 
   if (status === "unauthenticated") {
-    return (
-      <div className="flex min-h-svh items-center justify-center p-6">
-        <SignInForm />
-      </div>
-    )
+    return <SignInPage />
   }
 
   return (
