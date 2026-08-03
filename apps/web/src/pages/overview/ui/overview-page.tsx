@@ -3,10 +3,9 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useSessionContext } from "@/entities/session"
 import { useProjects } from "@/entities/project"
 import { useWorkflows } from "@/entities/workflow"
-import { SignInPage } from "@/pages/sign-in"
 
-export function App() {
-  const { status, user, isAuthenticated, signOut } = useSessionContext()
+export function OverviewPage() {
+  const { user, isAuthenticated, signOut } = useSessionContext()
   const queryClient = useQueryClient()
   const projectsQuery = useProjects(isAuthenticated)
   const workflowsQuery = useWorkflows(isAuthenticated)
@@ -14,18 +13,6 @@ export function App() {
   const handleSignOut = async () => {
     await signOut()
     queryClient.clear()
-  }
-
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-svh items-center justify-center p-6 text-sm">
-        Loading...
-      </div>
-    )
-  }
-
-  if (status === "unauthenticated") {
-    return <SignInPage />
   }
 
   return (
@@ -68,5 +55,3 @@ export function App() {
     </div>
   )
 }
-
-export default App

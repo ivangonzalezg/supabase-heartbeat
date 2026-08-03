@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import App from "./App"
+import { OverviewPage } from "./overview-page"
 
 const { useSessionContextMock } = vi.hoisted(() => ({
   useSessionContextMock: vi.fn(),
@@ -10,7 +10,6 @@ const { useSessionContextMock } = vi.hoisted(() => ({
 
 vi.mock("@/entities/session", () => ({
   useSessionContext: useSessionContextMock,
-  authClient: { signIn: { email: vi.fn() } },
 }))
 
 const defaultWorkspaceSummary = { projects: [], workflows: [] }
@@ -26,18 +25,18 @@ function mockFetch(
   return fetchMock
 }
 
-function renderApp() {
+function renderOverviewPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <App />
+      <OverviewPage />
     </QueryClientProvider>
   )
 }
 
-describe("App", () => {
+describe("OverviewPage", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -52,37 +51,6 @@ describe("App", () => {
     })
   })
 
-  it("shows a loading state while the session is loading", () => {
-    mockFetch()
-    useSessionContextMock.mockReturnValue({
-      status: "loading",
-      user: null,
-      role: null,
-      isAuthenticated: false,
-      signOut: vi.fn(),
-    })
-
-    renderApp()
-
-    expect(screen.getByText("Loading...")).toBeInTheDocument()
-  })
-
-  it("shows the sign-in form when unauthenticated", () => {
-    mockFetch()
-    useSessionContextMock.mockReturnValue({
-      status: "unauthenticated",
-      user: null,
-      role: null,
-      isAuthenticated: false,
-      signOut: vi.fn(),
-    })
-
-    renderApp()
-
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
-  })
-
   it("shows the signed-in user and calls signOut on click", async () => {
     mockFetch()
     const signOut = vi.fn()
@@ -94,7 +62,7 @@ describe("App", () => {
       signOut,
     })
 
-    renderApp()
+    renderOverviewPage()
 
     expect(
       screen.getByText("Signed in as Admin (admin@example.com).")
@@ -130,7 +98,7 @@ describe("App", () => {
       )
     )
 
-    renderApp()
+    renderOverviewPage()
 
     expect(await screen.findByText(/"name": "Demo"/)).toBeInTheDocument()
   })

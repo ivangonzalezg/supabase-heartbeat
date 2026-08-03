@@ -108,8 +108,7 @@ describe("useWorkspaceSummaryQuery", () => {
     )
 
     const { result } = renderHook(
-      () =>
-        useWorkspaceSummaryQuery(true, { select: (data) => data.projects }),
+      () => useWorkspaceSummaryQuery(true, { select: (data) => data.projects }),
       { wrapper: createWrapper() }
     )
 

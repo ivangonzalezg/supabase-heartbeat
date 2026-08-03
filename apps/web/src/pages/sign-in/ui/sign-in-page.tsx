@@ -1,5 +1,4 @@
-import logoDark from "@/shared/assets/brand/logo-horizontal-dark.svg"
-import logoLight from "@/shared/assets/brand/logo-horizontal-light.svg"
+import { logoHorizontalDark, logoHorizontalLight } from "@/shared/assets"
 import { SignInForm } from "./sign-in-form"
 
 export function SignInPage() {
@@ -8,12 +7,12 @@ export function SignInPage() {
       <div className="w-full max-w-md rounded-[10px] border border-border bg-card p-8">
         <div className="pb-6">
           <img
-            src={logoLight}
+            src={logoHorizontalLight}
             alt="Supabase Heartbeat"
             className="h-8 w-auto dark:hidden"
           />
           <img
-            src={logoDark}
+            src={logoHorizontalDark}
             alt="Supabase Heartbeat"
             className="hidden h-8 w-auto dark:block"
           />

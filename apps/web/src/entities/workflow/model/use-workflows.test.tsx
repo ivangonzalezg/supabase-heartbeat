@@ -28,7 +28,11 @@ const project = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 }
 
-function sampleWorkflow(overrides: { id: string; projectId: string; name: string }) {
+function sampleWorkflow(overrides: {
+  id: string
+  projectId: string
+  name: string
+}) {
   return {
     ...overrides,
     description: null,
