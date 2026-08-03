@@ -1,46 +1,20 @@
 import { Button } from "@/shared/ui"
-import { useEffect, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useSessionContext } from "@/entities/session"
+import { useProjects } from "@/entities/project"
+import { useWorkflows } from "@/entities/workflow"
 import { SignInPage } from "@/pages/sign-in"
 
-type ApiStatus = "Loading" | "API online" | "API unavailable"
-
 export function App() {
-  const { status, user, signOut } = useSessionContext()
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("Loading")
+  const { status, user, isAuthenticated, signOut } = useSessionContext()
+  const queryClient = useQueryClient()
+  const projectsQuery = useProjects(isAuthenticated)
+  const workflowsQuery = useWorkflows(isAuthenticated)
 
-  useEffect(() => {
-    let cancelled = false
-
-    fetch("/api/health")
-      .then(async (response) => {
-        if (!response.ok) {
-          return false
-        }
-        // A 200 alone doesn't prove this reached the API, since a misrouted
-        // proxy could return Vite's HTML with the same status.
-        const body: unknown = await response.json()
-        return (
-          typeof body === "object" &&
-          body !== null &&
-          (body as { status?: unknown }).status === "ok"
-        )
-      })
-      .then((isHealthy) => {
-        if (!cancelled) {
-          setApiStatus(isHealthy ? "API online" : "API unavailable")
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setApiStatus("API unavailable")
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const handleSignOut = async () => {
+    await signOut()
+    queryClient.clear()
+  }
 
   if (status === "loading") {
     return (
@@ -63,16 +37,30 @@ export function App() {
             Signed in as {user?.name} ({user?.email}).
           </p>
           <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
           <Button
             variant="outline"
-            className="mt-2 ml-2"
-            onClick={() => void signOut()}
+            className="mt-2"
+            onClick={() => void handleSignOut()}
           >
             Sign out
           </Button>
         </div>
-        <p>{apiStatus}</p>
+        <div>
+          <p className="font-medium">Workspace summary</p>
+          <pre className="mt-1 max-w-full overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
+            {JSON.stringify(
+              {
+                projects: projectsQuery.data,
+                workflows: workflowsQuery.data,
+                isLoading: projectsQuery.isLoading || workflowsQuery.isLoading,
+                error:
+                  projectsQuery.error?.message ?? workflowsQuery.error?.message,
+              },
+              null,
+              2
+            )}
+          </pre>
+        </div>
         <div className="font-mono text-xs text-muted-foreground">
           (Press <kbd>d</kbd> to toggle dark mode)
         </div>

@@ -16,11 +16,12 @@ vi.mock("@/entities/session/model/auth-client", () => ({
 }))
 
 function SessionProbe() {
-  const { user, role, status, signOut } = useSessionContext()
+  const { user, role, status, isAuthenticated, signOut } = useSessionContext()
 
   return (
     <div>
       <p>status: {status}</p>
+      <p>isAuthenticated: {String(isAuthenticated)}</p>
       <p>user: {user ? user.email : "none"}</p>
       <p>role: {role ?? "none"}</p>
       <button onClick={() => void signOut()}>Sign out</button>
@@ -39,6 +40,7 @@ describe("SessionProvider", () => {
     )
 
     expect(screen.getByText("status: loading")).toBeInTheDocument()
+    expect(screen.getByText("isAuthenticated: false")).toBeInTheDocument()
   })
 
   it("reports unauthenticated when there is no session", () => {
@@ -51,6 +53,7 @@ describe("SessionProvider", () => {
     )
 
     expect(screen.getByText("status: unauthenticated")).toBeInTheDocument()
+    expect(screen.getByText("isAuthenticated: false")).toBeInTheDocument()
   })
 
   it("exposes the user and role when authenticated", () => {
@@ -73,6 +76,7 @@ describe("SessionProvider", () => {
     )
 
     expect(screen.getByText("status: authenticated")).toBeInTheDocument()
+    expect(screen.getByText("isAuthenticated: true")).toBeInTheDocument()
     expect(screen.getByText("user: admin@example.com")).toBeInTheDocument()
     expect(screen.getByText("role: admin")).toBeInTheDocument()
   })

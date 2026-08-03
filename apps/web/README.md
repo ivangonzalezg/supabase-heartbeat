@@ -7,8 +7,14 @@ React frontend for Supabase Heartbeat.
 Currently, the interface only renders a minimal page with a status text that
 checks whether the API is reachable (`GET /api/health`) and displays
 `Loading`, `API online`, or `API unavailable`. There is no dashboard,
-authentication UI, routing, project/workflow management, or scheduler UI
-yet — those are planned, not implemented.
+routing, or scheduler UI yet — those are planned, not implemented.
+
+A cross-project summary of the authenticated user's projects and workflows
+(the full field set, minus each workflow's `steps`) is fetched and cached
+via TanStack Query, exposed through `entities/project` (`useProjects`) and
+`entities/workflow` (`useWorkflows`, `useWorkflowsByProject`). This exists
+ahead of the sidebar UI that will consume it, so that UI can render
+instantly from cache instead of starting from a blank loading state.
 
 ## Stack
 
@@ -20,6 +26,9 @@ yet — those are planned, not implemented.
 * Vitest.
 * React Testing Library (`@testing-library/react`, `@testing-library/dom`,
   `@testing-library/user-event`, `@testing-library/jest-dom`).
+* TanStack Query (`@tanstack/react-query`) for server-state fetching and
+  caching. `QueryClientProvider` is mounted once in `main.tsx`, outermost
+  among the app's providers.
 * [Feature-Sliced Design](https://feature-sliced.design/) (FSD) for source
   organization, enforced by `steiger`.
 
@@ -82,9 +91,18 @@ src/
 ```
 
 Each slice follows the FSD `api / model / ui / lib` segment convention.
-`pages`, `widgets`, `features`, and `entities` are currently empty
-placeholders — they are populated as the corresponding functionality is
-built, not created speculatively.
+`widgets` and `features` are currently empty placeholders — they are
+populated as the corresponding functionality is built, not created
+speculatively. `entities/session`, `entities/project`, and
+`entities/workflow` exist; `entities/project` and `entities/workflow` both
+read from the same `/api/workspace-summary` endpoint (defined once in
+`shared/api`, since `shared` cannot depend on `entities`) through a shared
+TanStack Query cache key, so mounting both together triggers a single
+network request, not two. Each hook takes an explicit `enabled: boolean`
+parameter rather than reading auth status itself — `shared`/`entities`
+cannot import `entities/session` (steiger forbids both upward and
+same-layer cross-slice imports), so gating the fetch on authentication is
+the composing widget/page's responsibility.
 
 Cross-layer dependency rules (for example, `entities` must not import from
 `pages`) are enforced by [steiger](https://github.com/feature-sliced/steiger)
@@ -196,9 +214,15 @@ Not implemented yet — noted here only so future structure decisions aren't
 made blind:
 
 * A dashboard for managing Supabase projects and workflows, under `pages/`.
-* Authentication UI wired to the API's Better Auth endpoints, under
-  `entities/session` and related slices.
-* Client-side routing, under `app/router`.
+* A sidebar widget (`widgets/`) for switching between projects and
+  workflows, consuming the already-available `entities/project` and
+  `entities/workflow` summary hooks.
+* Client-side routing, under `app/router` — the "active" project/workflow
+  selection is not yet URL-driven; that's a separate, not-yet-scoped task.
+* Per-workflow step fetching, and any execution stats/next-run times — the
+  summary hooks expose every `Project`/`Workflow` field except a
+  workflow's `steps`; detail pages will fetch steps and execution data
+  separately, with their own loading states.
 
 ## Conventions
 
@@ -207,9 +231,11 @@ made blind:
   on ad hoc `div`s and test IDs.
 * Colocate component tests with their components.
 * Do not import API database models/schema into frontend code.
-* Do not add a router or state-management/data-fetching library without an
-  explicit task to do so. UI components are added through shadcn/ui — see
-  "UI components (shadcn/ui)" above for the required check-first flow.
+* Do not add a router without an explicit task to do so. TanStack Query is
+  the established data-fetching library (see "Stack" above) — reuse it
+  for new server-state needs rather than introducing another one. UI
+  components are added through shadcn/ui — see "UI components (shadcn/ui)"
+  above for the required check-first flow.
 * Respect FSD layer boundaries; let `steiger` catch violations rather than
   relying on manual review alone.
 * File names use kebab-case (`session-provider.tsx`, `sign-in-form.tsx`,

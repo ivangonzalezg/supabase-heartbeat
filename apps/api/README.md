@@ -29,6 +29,10 @@ Currently implemented:
   Workflows, for managing steps after creation, including a complete-order
   transactional reorder endpoint for the frontend's future drag-and-drop
   editor — see "Workflow Steps API" below.
+* A Workspace Summary API (`/api/workspace-summary`) — a single-request,
+  cross-project summary of the actor's own projects and workflows, for the
+  frontend to render sidebar-style switching without an N+1 request
+  pattern — see "Workspace Summary API" below.
 * A browser-compatible shared validation package
   (`packages/validation`, `@supabase-heartbeat/validation`) providing Zod
   schemas and inferred types for workflow step configuration, reused by
@@ -105,7 +109,8 @@ src/
     ├── projects/    # Projects API — CRUD with ownership authorization (see "Projects API")
     ├── workflows/   # Workflows API — nested under Projects (see "Workflows API")
     │   └── steps/   # Workflow Steps API — nested under Workflows (see "Workflow Steps API")
-    └── workflow-execution/ # Executor contract, registry, context, signin/signout/wait executors (see "Workflow execution foundation")
+    ├── workflow-execution/ # Executor contract, registry, context, signin/signout/wait executors (see "Workflow execution foundation")
+    └── workspace-summary/ # GET /api/workspace-summary — cross-project projects+workflows summary (see "Workspace Summary API")
 ```
 
 `packages/validation` (`@supabase-heartbeat/validation`) is a separate,
@@ -613,6 +618,47 @@ Better Auth's HTTP-only session cookie
 existing `ProjectsController` still uses `@ApiBearerAuth()`, which does
 not reflect actual runtime behavior — left unchanged here as out of
 scope for this task; worth correcting in a follow-up.)
+
+## Workspace Summary API
+
+`GET /api/workspace-summary` (`src/modules/workspace-summary/`) — a
+single-request, cross-project summary of the actor's own projects and
+workflows, purpose-built for frontend sidebar-style project/workflow
+switching without an N+1 request pattern (`GET /api/projects` plus one
+`GET /api/projects/:projectId/workflows` per project). Not a substitute
+for the Projects/Workflows list or detail endpoints above — it reuses
+their exact response shapes (`ProjectResponse[]`, `WorkflowResponse[]`)
+rather than a reduced one, minus each workflow's `steps` array (fetched
+separately, per workflow, only once a specific workflow is opened).
+
+**Authentication:** requires an authenticated session, same as every other
+module. No `@Roles(['admin'])` — both `admin` and `viewer` may call this,
+identical to `GET /api/projects` and `GET /api/projects/:projectId/workflows`.
+
+**Ownership scoping**, enforced in `WorkspaceSummaryService.get`, two
+independent read queries run with `Promise.all` (no shared transaction
+needed for reads):
+
+* Projects — `WHERE owner_id = actor.userId`, the full row (same as
+  `ProjectsService.list`).
+* Workflows — joined to `projects` (`INNER JOIN projects ON projects.id =
+  workflows.project_id`) and filtered by `projects.owner_id =
+  actor.userId`, selecting every `WorkflowResponse` field except `steps`.
+  This is the one cross-project aggregate query in the API — every other
+  workflow query is scoped to a single `:projectId` route parameter.
+
+**Response shape** — reuses `ProjectResponse` and `WorkflowResponse` (see
+"Projects API" and "Workflows API" above) as-is:
+
+```ts
+{
+  projects: ProjectResponse[];
+  workflows: WorkflowResponse[]; // no `steps`
+}
+```
+
+An empty result (`{ projects: [], workflows: [] }`) for a user with no
+projects is a valid, non-error response.
 
 ## Workflow Steps API
 

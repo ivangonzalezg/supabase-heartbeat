@@ -17,6 +17,7 @@ type SessionContextValue = {
   user: SessionUser | null
   role: ApplicationRole | null
   status: SessionStatus
+  isAuthenticated: boolean
   signOut: () => Promise<void>
 }
 
@@ -38,11 +39,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (isPending) {
-      return { user: null, role: null, status: "loading", signOut }
+      return {
+        user: null,
+        role: null,
+        status: "loading",
+        isAuthenticated: false,
+        signOut,
+      }
     }
 
     if (!data?.user) {
-      return { user: null, role: null, status: "unauthenticated", signOut }
+      return {
+        user: null,
+        role: null,
+        status: "unauthenticated",
+        isAuthenticated: false,
+        signOut,
+      }
     }
 
     const role = toApplicationRole(data.user.role)
@@ -56,6 +69,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       role,
       status: "authenticated",
+      isAuthenticated: true,
       signOut,
     }
   }, [data, isPending])
