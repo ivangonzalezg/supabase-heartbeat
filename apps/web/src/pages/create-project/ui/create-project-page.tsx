@@ -88,9 +88,9 @@ export function CreateProjectPage() {
         </div>
       </div>
 
-      <div className="flex max-w-245 flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <SectionCard eyebrow="PROJECT DETAILS">
-          <FieldGroup className="@container/field-group flex-row gap-5 *:flex-1">
+          <FieldGroup className="gap-5 md:flex-row md:*:flex-1">
             <Controller
               name="name"
               control={form.control}
@@ -138,7 +138,7 @@ export function CreateProjectPage() {
         </SectionCard>
 
         <SectionCard eyebrow="SUPABASE CONNECTION">
-          <FieldGroup className="@container/field-group flex-row gap-5 *:flex-1">
+          <FieldGroup className="gap-5 md:flex-row md:*:flex-1">
             <Controller
               name="supabaseUrl"
               control={form.control}
