@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router"
-import { ActivityIcon, LayoutDashboardIcon } from "lucide-react"
+import { LayoutDashboardIcon } from "lucide-react"
+import { logoHorizontalDark, logoHorizontalLight } from "@/shared/images"
 import {
   Sidebar,
   SidebarContent,
@@ -21,26 +22,19 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link to="/">
-                <div className="flex size-8.5 items-center justify-center rounded-[7px] bg-foreground text-background">
-                  <ActivityIcon className="size-4 stroke-primary" />
-                </div>
-                <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="text-sm font-bold text-foreground">
-                    Supabase Heartbeat
-                  </span>
-                  <span className="font-mono text-[8px] font-semibold tracking-wide text-muted-foreground">
-                    WORKFLOW OPERATIONS
-                  </span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarHeader className="mx-4 h-16 border-b">
+        <Link to="/" className="flex h-full items-center py-0.5">
+          <img
+            src={logoHorizontalLight}
+            alt="Supabase Heartbeat"
+            className="h-full w-auto dark:hidden"
+          />
+          <img
+            src={logoHorizontalDark}
+            alt="Supabase Heartbeat"
+            className="hidden h-full w-auto dark:block"
+          />
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>
@@ -50,7 +44,7 @@ export function AppSidebar() {
               <SidebarMenuButton
                 asChild
                 isActive={isOverviewActive}
-                className="data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground"
+                className="h-auto data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground"
               >
                 <Link to="/">
                   <LayoutDashboardIcon />
@@ -61,8 +55,8 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel className="font-mono text-muted-foreground">
+        <SidebarGroup className="px-5">
+          <SidebarGroupLabel className="px-0 font-mono text-muted-foreground">
             PROJECTS
           </SidebarGroupLabel>
           <NavProjects />

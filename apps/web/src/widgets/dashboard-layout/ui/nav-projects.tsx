@@ -63,7 +63,7 @@ export function NavProjects() {
         ))}
       </SidebarMenu>
       {projects.length === 0 && !projectsQuery.isLoading ? (
-        <p className="px-2 py-2 font-mono text-[9px] font-semibold text-muted-foreground">
+        <p className="py-2 font-mono text-[9px] font-semibold text-muted-foreground">
           NO PROJECTS YET
         </p>
       ) : null}

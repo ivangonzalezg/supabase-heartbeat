@@ -70,7 +70,9 @@ describe("router integration", () => {
   it("renders the sidebar and the overview page through the full route tree", async () => {
     renderApp()
 
-    expect(await screen.findByText("Supabase Heartbeat")).toBeInTheDocument()
+    expect(
+      await screen.findAllByAltText("Supabase Heartbeat")
+    ).not.toHaveLength(0)
     expect(
       await screen.findByRole("heading", { name: "Overview" })
     ).toBeInTheDocument()
