@@ -94,19 +94,22 @@ src/
 ```
 
 Each slice follows the FSD `api / model / ui / lib` segment convention.
-`widgets` and `features` are currently empty placeholders — they are
-populated as the corresponding functionality is built, not created
-speculatively. `entities/session`, `entities/project`, and
-`entities/workflow` exist; `entities/project` and `entities/workflow` both
-read from the same `/api/workspace-summary` endpoint (defined once in
-`shared/api`, since `shared` cannot depend on `entities`) through a shared
-TanStack Query cache key, so mounting both together triggers a single
-network request, not two. Each hook takes an explicit `enabled: boolean`
-parameter rather than reading auth status itself — `shared`/`entities`
-cannot import `entities/session` (steiger forbids both upward and
-same-layer cross-slice imports), so gating the fetch on authentication is
-the composing page's responsibility (`pages/overview` passes
-`isAuthenticated` from `useSessionContext()` into both hooks).
+`features` is currently an empty placeholder — populated as the
+corresponding functionality is built, not created speculatively.
+`widgets/dashboard-layout` exists: the sidebar + layout shell wrapping
+every dashboard-area page (see "Routing" below for how it's wired in).
+`entities/session`, `entities/project`, and `entities/workflow` exist;
+`entities/project` and `entities/workflow` both read from the same
+`/api/workspace-summary` endpoint (defined once in `shared/api`, since
+`shared` cannot depend on `entities`) through a shared TanStack Query
+cache key, so mounting both together triggers a single network request,
+not two. Each hook takes an explicit `enabled: boolean` parameter rather
+than reading auth status itself — `shared`/`entities` cannot import
+`entities/session` (steiger forbids both upward and same-layer
+cross-slice imports), so gating the fetch on authentication is the
+composing widget/page's responsibility (`widgets/dashboard-layout`'s
+sidebar and `pages/overview` both pass `isAuthenticated` from
+`useSessionContext()` into the hooks independently).
 
 Cross-layer dependency rules (for example, `entities` must not import from
 `pages`) are enforced by [steiger](https://github.com/feature-sliced/steiger)
@@ -124,21 +127,32 @@ with the official `@feature-sliced/steiger-plugin`, `recommended` preset
   `/sign-in`. Individual pages/routes carry no guard logic of their own.
   While `status === "loading"`, it renders a loading state instead of
   `<Outlet />`.
-* `routes/index-route.tsx` — `/`, renders `pages/overview`.
-* `routes/sign-in-route.tsx` — `/sign-in`, renders `pages/sign-in`.
-* `router.tsx` — builds the route tree (`rootRoute.addChildren([...])`)
-  and the `router` instance; also declares the TanStack Router module
-  augmentation (`declare module "@tanstack/react-router" { interface
-  Register { router: typeof router } }`) for type-safe navigation.
+* `dashboard-layout-route.tsx` — a **pathless layout route**
+  (`createRoute({ id: "dashboard-layout", ... })`, no `path`) nested under
+  `rootRoute`, rendering `widgets/dashboard-layout`'s `DashboardLayout`
+  (sidebar + content shell). Contributes no URL segment; only wraps its
+  children in the sidebar chrome.
+* `routes/index-route.tsx` — `/`, nested under `dashboardLayoutRoute`,
+  renders `pages/overview`.
+* `routes/sign-in-route.tsx` — `/sign-in`, nested directly under
+  `rootRoute` (outside the dashboard layout — no sidebar on the sign-in
+  screen).
+* `router.tsx` — builds the route tree: `rootRoute.addChildren([
+  dashboardLayoutRoute.addChildren([indexRoute]), signInRoute ])` and the
+  `router` instance; also declares the TanStack Router module augmentation
+  (`declare module "@tanstack/react-router" { interface Register { router:
+  typeof router } }`) for type-safe navigation.
 * `index.ts` — public API, exports `router`.
 
 Routing uses **code-based route definitions** (`createRoute(...)` objects),
 not file-based routing/codegen (`@tanstack/router-plugin`'s `src/routes/`
 directory convention) — at this route count, file-based routing's
 generated route tree would duplicate FSD's own `pages/<page>/` directory
-convention for no benefit. Add new routes as `createRoute` objects under
-`app/router/routes/`, following the existing two as the pattern, rather
-than introducing a `src/routes/` convention.
+convention for no benefit. Add new leaf routes as `createRoute` objects
+under `app/router/routes/` (nested under `dashboardLayoutRoute` if they
+belong inside the sidebar shell), following the existing ones as the
+pattern; non-leaf/layout routes (like `dashboard-layout-route.tsx`) live
+as siblings of `root-route.tsx` instead, not inside `routes/`.
 
 Because the root route wraps every child route via `<Outlet />`, it stays
 mounted across navigations, so sign-out/sign-in redirects happen
@@ -254,13 +268,16 @@ apps/web/dist
 Not implemented yet — noted here only so future structure decisions aren't
 made blind:
 
-* A dashboard for managing Supabase projects and workflows, under `pages/`.
-* A sidebar widget (`widgets/`) for switching between projects and
-  workflows, consuming the already-available `entities/project` and
-  `entities/workflow` summary hooks.
+* A full dashboard for managing Supabase projects and workflows, under
+  `pages/` — `pages/overview` today only shows a welcome message and
+  project/workflow counts.
 * Route-driven project/workflow selection (e.g. `/projects/$projectId`,
-  `/workflows/$workflowId`) — only `/` and `/sign-in` exist today; detail
-  routes are a separate, not-yet-scoped task.
+  `/workflows/$workflowId`) — `widgets/dashboard-layout`'s sidebar
+  already lists real projects/workflows with expand/collapse, but
+  clicking a row doesn't navigate anywhere yet; only `/` and `/sign-in`
+  exist as routes. Detail routes are a separate, not-yet-scoped task.
+* A working "New project" action — the sidebar's button is rendered
+  `disabled` today, with no route to navigate to.
 * Per-workflow step fetching, and any execution stats/next-run times — the
   summary hooks expose every `Project`/`Workflow` field except a
   workflow's `steps`; detail pages will fetch steps and execution data

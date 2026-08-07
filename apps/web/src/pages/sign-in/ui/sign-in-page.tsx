@@ -1,4 +1,4 @@
-import { logoHorizontalDark, logoHorizontalLight } from "@/shared/assets"
+import { logoHorizontalDark, logoHorizontalLight } from "@/shared/images"
 import { SignInForm } from "./sign-in-form"
 
 export function SignInPage() {

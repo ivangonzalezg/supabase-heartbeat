@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OverviewPage } from "./overview-page"
 
@@ -51,31 +50,16 @@ describe("OverviewPage", () => {
     })
   })
 
-  it("shows the signed-in user and calls signOut on click", async () => {
+  it("shows a welcome message for the signed-in user", async () => {
     mockFetch()
-    const signOut = vi.fn()
-    useSessionContextMock.mockReturnValue({
-      status: "authenticated",
-      user: { id: "user-1", email: "admin@example.com", name: "Admin" },
-      role: "admin",
-      isAuthenticated: true,
-      signOut,
-    })
 
     renderOverviewPage()
 
-    expect(
-      screen.getByText("Signed in as Admin (admin@example.com).")
-    ).toBeInTheDocument()
-
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Sign out" }))
-
-    expect(signOut).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText("Welcome back, Admin")).toBeInTheDocument()
+    expect(screen.getByText("admin@example.com")).toBeInTheDocument()
   })
 
-  it("renders the workspace summary once fetched", async () => {
+  it("renders the project and workflow counts once fetched", async () => {
     mockFetch(
       new Response(
         JSON.stringify({
@@ -100,6 +84,7 @@ describe("OverviewPage", () => {
 
     renderOverviewPage()
 
-    expect(await screen.findByText(/"name": "Demo"/)).toBeInTheDocument()
+    const projectsCount = await screen.findByText("1")
+    expect(projectsCount.nextSibling).toHaveTextContent("Projects")
   })
 })
