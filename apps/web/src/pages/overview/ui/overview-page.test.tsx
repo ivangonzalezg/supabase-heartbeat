@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
@@ -91,7 +91,40 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("No projects yet")).toBeInTheDocument()
   })
 
-  it("renders the project and workflow counts once fetched", async () => {
+  it("shows the no-workflows state when projects exist but no workflow does", async () => {
+    mockFetch(
+      new Response(
+        JSON.stringify({
+          projects: [
+            {
+              id: "project-1",
+              ownerId: "user-1",
+              name: "Demo",
+              description: "Production project",
+              supabaseUrl: "https://example.supabase.co",
+              publishableKey: "sb_publishable_example",
+              enabled: true,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          workflows: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    )
+
+    renderOverviewPage()
+
+    expect(
+      await screen.findByText("Choose a project to create its first workflow")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Demo")).toBeInTheDocument()
+    expect(screen.getByText("Production project")).toBeInTheDocument()
+    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument()
+  })
+
+  it("renders the project and workflow counts once at least one workflow exists", async () => {
     mockFetch(
       new Response(
         JSON.stringify({
@@ -108,7 +141,20 @@ describe("OverviewPage", () => {
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
           ],
-          workflows: [],
+          workflows: [
+            {
+              id: "workflow-1",
+              projectId: "project-1",
+              name: "Daily sync",
+              description: null,
+              cronExpression: "0 * * * *",
+              timezone: "UTC",
+              enabled: true,
+              overlapPolicy: "skip",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       )
@@ -116,8 +162,15 @@ describe("OverviewPage", () => {
 
     renderOverviewPage()
 
-    const projectsCount = await screen.findByText("1")
-    expect(projectsCount.nextSibling).toHaveTextContent("Projects")
+    await waitFor(() => {
+      expect(screen.getByText("Workflows").previousSibling).toHaveTextContent(
+        "1"
+      )
+    })
+    expect(screen.getByText("Projects").previousSibling).toHaveTextContent("1")
     expect(screen.queryByText("No projects yet")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Choose a project to create its first workflow")
+    ).not.toBeInTheDocument()
   })
 })

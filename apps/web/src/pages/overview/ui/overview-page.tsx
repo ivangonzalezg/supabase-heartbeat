@@ -1,7 +1,8 @@
 import { useSessionContext } from "@/entities/session"
 import { useProjects } from "@/entities/project"
 import { useWorkflows } from "@/entities/workflow"
-import { OverviewEmptyState } from "./overview-empty-state"
+import { OverviewNoProjectsState } from "./overview-no-projects-state"
+import { OverviewNoWorkflowsState } from "./overview-no-workflows-state"
 
 export function OverviewPage() {
   const { isAuthenticated } = useSessionContext()
@@ -9,6 +10,11 @@ export function OverviewPage() {
   const workflowsQuery = useWorkflows(isAuthenticated)
   const hasNoProjects =
     projectsQuery.isSuccess && projectsQuery.data.length === 0
+  const hasNoWorkflows =
+    projectsQuery.isSuccess &&
+    workflowsQuery.isSuccess &&
+    projectsQuery.data.length > 0 &&
+    workflowsQuery.data.length === 0
 
   return (
     <div className="flex min-h-full flex-col gap-6 p-6">
@@ -21,7 +27,11 @@ export function OverviewPage() {
 
       {hasNoProjects ? (
         <div className="flex flex-1 items-center justify-center">
-          <OverviewEmptyState />
+          <OverviewNoProjectsState />
+        </div>
+      ) : hasNoWorkflows ? (
+        <div className="flex flex-1 items-center justify-center">
+          <OverviewNoWorkflowsState projects={projectsQuery.data} />
         </div>
       ) : (
         <div className="flex gap-4">

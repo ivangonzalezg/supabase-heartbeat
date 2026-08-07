@@ -7,10 +7,12 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router"
-import { OverviewEmptyState } from "./overview-empty-state"
+import { OverviewNoProjectsState } from "./overview-no-projects-state"
 
 function renderEmptyState() {
-  const rootRoute = createRootRoute({ component: () => <OverviewEmptyState /> })
+  const rootRoute = createRootRoute({
+    component: () => <OverviewNoProjectsState />,
+  })
   const createProjectStub = createRoute({
     getParentRoute: () => rootRoute,
     path: "/projects/new",
@@ -24,7 +26,7 @@ function renderEmptyState() {
   return render(<RouterProvider router={router} />)
 }
 
-describe("OverviewEmptyState", () => {
+describe("OverviewNoProjectsState", () => {
   it("renders the empty state copy and a create-project link", async () => {
     renderEmptyState()
 

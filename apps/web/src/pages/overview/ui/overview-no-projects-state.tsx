@@ -2,7 +2,7 @@ import { FolderPlusIcon, PlusIcon } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 import { Button } from "@/shared/ui"
 
-export function OverviewEmptyState() {
+export function OverviewNoProjectsState() {
   return (
     <div className="flex justify-center">
       <div className="flex w-full max-w-155 flex-col items-center gap-1 rounded-lg border bg-card px-16 py-10 text-center">
