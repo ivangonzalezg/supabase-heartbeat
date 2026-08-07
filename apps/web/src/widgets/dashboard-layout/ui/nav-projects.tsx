@@ -24,11 +24,14 @@ function ProjectGroup({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton onClick={() => setExpanded((e) => !e)}>
+      <SidebarMenuButton
+        onClick={() => setExpanded((e) => !e)}
+        className="h-auto"
+      >
         {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
-        <span className="truncate text-xs font-semibold">{project.name}</span>
+        <span className="truncate">{project.name}</span>
       </SidebarMenuButton>
-      {expanded ? (
+      {expanded && workflows.length ? (
         <SidebarMenuSub>
           {workflows.map((workflow) => (
             <SidebarMenuSubItem key={workflow.id}>
@@ -70,7 +73,7 @@ export function NavProjects() {
       ) : null}
       <SidebarMenuButton
         asChild
-        className="mt-2 justify-center border border-dashed border-input text-xs font-semibold text-foreground"
+        className="mt-2 justify-center border border-dashed border-input text-foreground"
       >
         <Link to="/projects/new">
           <PlusIcon className="text-primary" />
