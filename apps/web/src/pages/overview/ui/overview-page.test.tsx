@@ -50,13 +50,27 @@ describe("OverviewPage", () => {
     })
   })
 
-  it("shows a welcome message for the signed-in user", async () => {
+  it("shows the page header", () => {
     mockFetch()
 
     renderOverviewPage()
 
-    expect(await screen.findByText("Welcome back, Admin")).toBeInTheDocument()
-    expect(screen.getByText("admin@example.com")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Overview" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Monitor your projects, workflows, and recent activity from one place."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("shows the empty state when there are no projects", async () => {
+    mockFetch()
+
+    renderOverviewPage()
+
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument()
   })
 
   it("renders the project and workflow counts once fetched", async () => {
@@ -86,5 +100,6 @@ describe("OverviewPage", () => {
 
     const projectsCount = await screen.findByText("1")
     expect(projectsCount.nextSibling).toHaveTextContent("Projects")
+    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument()
   })
 })

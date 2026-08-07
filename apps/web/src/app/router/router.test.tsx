@@ -72,7 +72,7 @@ describe("router integration", () => {
 
     expect(await screen.findByText("Supabase Heartbeat")).toBeInTheDocument()
     expect(
-      await screen.findByText("Welcome back, Admin User")
+      await screen.findByRole("heading", { name: "Overview" })
     ).toBeInTheDocument()
   })
 })

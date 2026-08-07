@@ -27,14 +27,14 @@ export function SidebarUserFooter() {
     <>
       <SidebarSeparator />
       <div className="flex items-center gap-2 px-2 py-1.5">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-sidebar-primary font-mono text-[9px] font-bold text-primary">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary font-mono text-xs font-bold text-primary">
           {getInitials(user.name)}
         </div>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-xs font-semibold text-sidebar-foreground">
+          <span className="truncate text-sm font-semibold text-sidebar-foreground">
             {user.name}
           </span>
-          <span className="truncate text-[10px] text-muted-foreground">
+          <span className="truncate text-xs text-muted-foreground capitalize">
             {role}
           </span>
         </div>
