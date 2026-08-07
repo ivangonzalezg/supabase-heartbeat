@@ -1,10 +1,11 @@
 import { FolderPlusIcon, PlusIcon } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import { Button } from "@/shared/ui"
 
 export function OverviewEmptyState() {
   return (
     <div className="flex justify-center">
-      <div className="flex w-full max-w-155 flex-col items-center gap-1 rounded-lg border bg-card px-8 py-10 text-center">
+      <div className="flex w-full max-w-155 flex-col items-center gap-1 rounded-lg border bg-card px-16 py-10 text-center">
         <div className="mb-3 flex size-20.5 items-center justify-center rounded-[10px] bg-sidebar-primary">
           <FolderPlusIcon className="size-8 text-primary" />
         </div>
@@ -17,9 +18,11 @@ export function OverviewEmptyState() {
         <p className="max-w-135 text-sm text-muted-foreground">
           Create your first project before workflow activity can appear here.
         </p>
-        <Button disabled className="mt-4">
-          <PlusIcon />
-          Create your first project
+        <Button asChild className="mt-4">
+          <Link to="/projects/new">
+            <PlusIcon />
+            Create your first project
+          </Link>
         </Button>
       </div>
     </div>

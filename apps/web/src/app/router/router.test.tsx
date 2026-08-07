@@ -9,6 +9,7 @@ import {
 import { rootRoute } from "./root-route"
 import { dashboardLayoutRoute } from "./dashboard-layout-route"
 import { indexRoute } from "./routes/index-route"
+import { createProjectRoute } from "./routes/create-project-route"
 import { signInRoute } from "./routes/sign-in-route"
 import { ThemeProvider } from "@/shared/lib/theme-provider"
 
@@ -33,14 +34,14 @@ function mockFetch() {
   return fetchMock
 }
 
-function renderApp() {
+function renderApp(initialEntries: string[] = ["/"]) {
   const routeTree = rootRoute.addChildren([
-    dashboardLayoutRoute.addChildren([indexRoute]),
+    dashboardLayoutRoute.addChildren([indexRoute, createProjectRoute]),
     signInRoute,
   ])
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries }),
   })
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -75,6 +76,14 @@ describe("router integration", () => {
     ).not.toHaveLength(0)
     expect(
       await screen.findByRole("heading", { name: "Overview" })
+    ).toBeInTheDocument()
+  })
+
+  it("renders the create-project page at /projects/new", async () => {
+    renderApp(["/projects/new"])
+
+    expect(
+      await screen.findByRole("heading", { name: "Create project" })
     ).toBeInTheDocument()
   })
 })

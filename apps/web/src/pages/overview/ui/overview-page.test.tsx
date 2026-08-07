@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router"
 import { OverviewPage } from "./overview-page"
 
 const { useSessionContextMock } = vi.hoisted(() => ({
@@ -25,12 +32,23 @@ function mockFetch(
 }
 
 function renderOverviewPage() {
+  const rootRoute = createRootRoute({ component: () => <OverviewPage /> })
+  const createProjectStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/new",
+    component: () => null,
+  })
+  const routeTree = rootRoute.addChildren([createProjectStub])
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <OverviewPage />
+      <RouterProvider router={router} />
     </QueryClientProvider>
   )
 }
@@ -50,13 +68,13 @@ describe("OverviewPage", () => {
     })
   })
 
-  it("shows the page header", () => {
+  it("shows the page header", async () => {
     mockFetch()
 
     renderOverviewPage()
 
     expect(
-      screen.getByRole("heading", { name: "Overview" })
+      await screen.findByRole("heading", { name: "Overview" })
     ).toBeInTheDocument()
     expect(
       screen.getByText(

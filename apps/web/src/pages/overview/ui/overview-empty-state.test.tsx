@@ -1,12 +1,34 @@
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router"
 import { OverviewEmptyState } from "./overview-empty-state"
 
-describe("OverviewEmptyState", () => {
-  it("renders the empty state copy and a disabled create-project button", () => {
-    render(<OverviewEmptyState />)
+function renderEmptyState() {
+  const rootRoute = createRootRoute({ component: () => <OverviewEmptyState /> })
+  const createProjectStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/new",
+    component: () => null,
+  })
+  const routeTree = rootRoute.addChildren([createProjectStub])
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
+  return render(<RouterProvider router={router} />)
+}
 
-    expect(screen.getByText("GET STARTED")).toBeInTheDocument()
+describe("OverviewEmptyState", () => {
+  it("renders the empty state copy and a create-project link", async () => {
+    renderEmptyState()
+
+    expect(await screen.findByText("GET STARTED")).toBeInTheDocument()
     expect(
       screen.getByRole("heading", { name: "No projects yet" })
     ).toBeInTheDocument()
@@ -16,9 +38,9 @@ describe("OverviewEmptyState", () => {
       )
     ).toBeInTheDocument()
 
-    const button = screen.getByRole("button", {
+    const link = screen.getByRole("link", {
       name: "Create your first project",
     })
-    expect(button).toBeDisabled()
+    expect(link).toHaveAttribute("href", "/projects/new")
   })
 })

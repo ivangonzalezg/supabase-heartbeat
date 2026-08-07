@@ -71,7 +71,12 @@ function renderSidebar() {
     path: "/",
     component: () => null,
   })
-  const routeTree = rootRoute.addChildren([indexStub])
+  const createProjectStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/new",
+    component: () => null,
+  })
+  const routeTree = rootRoute.addChildren([indexStub, createProjectStub])
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -140,13 +145,13 @@ describe("AppSidebar", () => {
     expect(await screen.findByText(/NO PROJECTS YET/)).toBeInTheDocument()
   })
 
-  it("renders a disabled New project button", async () => {
+  it("renders a New project link to the create-project route", async () => {
     mockFetch({ projects: [], workflows: [] })
 
     renderSidebar()
 
-    const button = await screen.findByRole("button", { name: /New project/ })
-    expect(button).toBeDisabled()
+    const link = await screen.findByRole("link", { name: /New project/ })
+    expect(link).toHaveAttribute("href", "/projects/new")
   })
 
   it("calls signOut when the sign out button is clicked", async () => {

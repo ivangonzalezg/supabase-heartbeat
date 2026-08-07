@@ -1,5 +1,6 @@
 import * as React from "react"
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import { useSessionContext } from "@/entities/session"
 import { useProjects, type Project } from "@/entities/project"
 import { useWorkflows, type Workflow } from "@/entities/workflow"
@@ -68,11 +69,13 @@ export function NavProjects() {
         </p>
       ) : null}
       <SidebarMenuButton
-        disabled
+        asChild
         className="mt-2 justify-center border border-dashed border-input text-xs font-semibold text-foreground"
       >
-        <PlusIcon className="text-primary" />
-        New project
+        <Link to="/projects/new">
+          <PlusIcon className="text-primary" />
+          New project
+        </Link>
       </SidebarMenuButton>
     </>
   )
