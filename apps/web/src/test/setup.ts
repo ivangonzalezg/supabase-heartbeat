@@ -25,6 +25,13 @@ globalThis.ResizeObserver ??= class ResizeObserver {
   disconnect() {}
 }
 
+// jsdom doesn't implement pointer capture or scrollIntoView; used by
+// radix-ui's Select.
+Element.prototype.hasPointerCapture ??= () => false
+Element.prototype.setPointerCapture ??= () => {}
+Element.prototype.releasePointerCapture ??= () => {}
+Element.prototype.scrollIntoView ??= () => {}
+
 afterEach(() => {
   cleanup()
 })

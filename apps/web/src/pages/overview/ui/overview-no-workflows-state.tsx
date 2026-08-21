@@ -1,4 +1,5 @@
 import { ArrowRightIcon, WorkflowIcon } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import type { Project } from "@/entities/project"
 
 function ProjectRow({ project }: { project: Project }) {
@@ -10,12 +11,14 @@ function ProjectRow({ project }: { project: Project }) {
           <p className="text-muted-foreground">{project.description}</p>
         ) : null}
       </div>
-      {/* No route exists yet for creating a workflow scoped to a
-          project — this action is presentational only, no href. */}
-      <span className="flex items-center gap-1.5 font-semibold text-primary">
+      <Link
+        to="/projects/$projectId/workflows/new"
+        params={{ projectId: project.id }}
+        className="flex items-center gap-1.5 font-semibold text-primary hover:underline"
+      >
         Create workflow
         <ArrowRightIcon className="size-3.5" />
-      </span>
+      </Link>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { WAIT_SECONDS_MAX } from '@supabase-heartbeat/validation';
 import type { Delay } from '../delay/delay';
 import type {
   ExecutableWorkflowStep,
@@ -94,9 +95,12 @@ describe('WaitStepExecutor', () => {
   it('does not actually wait for the schema maximum duration (uses the stub, never real time)', async () => {
     const start = Date.now();
 
-    await executor.execute(buildContext(jest.fn(), jest.fn()), buildStep(3600));
+    await executor.execute(
+      buildContext(jest.fn(), jest.fn()),
+      buildStep(WAIT_SECONDS_MAX),
+    );
 
     expect(Date.now() - start).toBeLessThan(1000);
-    expect(waitFn).toHaveBeenCalledWith(3600 * 1000);
+    expect(waitFn).toHaveBeenCalledWith(WAIT_SECONDS_MAX * 1000);
   });
 });

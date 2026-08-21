@@ -1,5 +1,5 @@
 {
-  "version": "2.15",
+  "version": "2.17",
   "children": [
     {
       "type": "frame",
@@ -38252,6 +38252,292 @@
           "fontWeight": "normal"
         }
       ]
+    },
+    {
+      "id": "YVvD6",
+      "type": "ref",
+      "ref": "Y1Wlgs",
+      "name": "Sidebar — No projects — Light",
+      "x": 848,
+      "y": 2220,
+      "theme": {
+        "mode": "light"
+      },
+      "descendants": {
+        "Phye1": {
+          "enabled": false
+        },
+        "e1n4ZM": {
+          "enabled": false
+        },
+        "Ttafv": {
+          "enabled": false
+        },
+        "N86f8z": {
+          "enabled": false
+        },
+        "D7kGC": {
+          "enabled": false
+        },
+        "osZUs": {
+          "enabled": false
+        },
+        "IAfFG": {
+          "enabled": false
+        },
+        "szs7m": {
+          "enabled": false
+        },
+        "uPjvr": {
+          "enabled": false
+        },
+        "yZC1X": {
+          "enabled": false
+        },
+        "y4hSH": {
+          "enabled": false
+        },
+        "bo7si": {
+          "enabled": false
+        },
+        "TWSg1": {
+          "enabled": true,
+          "content": "NO PROJECTS YET",
+          "layoutPosition": "absolute",
+          "x": 20,
+          "y": 302
+        }
+      }
+    },
+    {
+      "id": "mEHVj",
+      "type": "ref",
+      "ref": "Y1Wlgs",
+      "name": "Sidebar — No projects — Dark",
+      "x": 1256,
+      "y": 2220,
+      "theme": {
+        "mode": "dark"
+      },
+      "descendants": {
+        "Phye1": {
+          "enabled": false
+        },
+        "e1n4ZM": {
+          "enabled": false
+        },
+        "Ttafv": {
+          "enabled": false
+        },
+        "N86f8z": {
+          "enabled": false
+        },
+        "D7kGC": {
+          "enabled": false
+        },
+        "osZUs": {
+          "enabled": false
+        },
+        "IAfFG": {
+          "enabled": false
+        },
+        "szs7m": {
+          "enabled": false
+        },
+        "uPjvr": {
+          "enabled": false
+        },
+        "yZC1X": {
+          "enabled": false
+        },
+        "y4hSH": {
+          "enabled": false
+        },
+        "bo7si": {
+          "enabled": false
+        },
+        "TWSg1": {
+          "enabled": true,
+          "content": "NO PROJECTS YET",
+          "layoutPosition": "absolute",
+          "x": 20,
+          "y": 302
+        }
+      }
+    },
+    {
+      "id": "liXvO",
+      "type": "ref",
+      "ref": "Y1Wlgs",
+      "name": "Sidebar — One project, no workflows — Light",
+      "x": 1664,
+      "y": 2220,
+      "theme": {
+        "mode": "light"
+      },
+      "descendants": {
+        "N86f8z": {
+          "enabled": false
+        },
+        "D7kGC": {
+          "enabled": false
+        },
+        "osZUs": {
+          "enabled": false
+        },
+        "IAfFG": {
+          "enabled": false
+        },
+        "szs7m": {
+          "enabled": false
+        },
+        "uPjvr": {
+          "enabled": false
+        },
+        "yZC1X": {
+          "enabled": false
+        },
+        "y4hSH": {
+          "enabled": false
+        },
+        "bo7si": {
+          "enabled": false
+        },
+        "TWSg1": {
+          "enabled": true,
+          "content": "NO WORKFLOWS YET",
+          "layoutPosition": "absolute",
+          "x": 32,
+          "y": 338
+        }
+      }
+    },
+    {
+      "id": "bFzq0",
+      "type": "ref",
+      "ref": "Y1Wlgs",
+      "name": "Sidebar — One project, no workflows — Dark",
+      "x": 2072,
+      "y": 2220,
+      "theme": {
+        "mode": "dark"
+      },
+      "descendants": {
+        "N86f8z": {
+          "enabled": false
+        },
+        "D7kGC": {
+          "enabled": false
+        },
+        "osZUs": {
+          "enabled": false
+        },
+        "IAfFG": {
+          "enabled": false
+        },
+        "szs7m": {
+          "enabled": false
+        },
+        "uPjvr": {
+          "enabled": false
+        },
+        "yZC1X": {
+          "enabled": false
+        },
+        "y4hSH": {
+          "enabled": false
+        },
+        "bo7si": {
+          "enabled": false
+        },
+        "TWSg1": {
+          "enabled": true,
+          "content": "NO WORKFLOWS YET",
+          "layoutPosition": "absolute",
+          "x": 32,
+          "y": 338
+        }
+      }
+    },
+    {
+      "id": "nayog",
+      "type": "ref",
+      "ref": "Y1Wlgs",
+      "name": "Sidebar — Multiple projects, no workflows — Light",
+      "x": 2480,
+      "y": 2220,
+      "theme": {
+        "mode": "light"
+      },
+      "descendants": {
+        "Phye1": {
+          "fill": "#00000000"
+        },
+        "Ttafv": {
+          "icon": "chevron-right"
+        },
+        "N86f8z": {
+          "enabled": false
+        },
+        "D7kGC": {
+          "enabled": false
+        },
+        "osZUs": {
+          "enabled": false
+        },
+        "IAfFG": {
+          "enabled": false
+        },
+        "szs7m": {
+          "enabled": false
+        },
+        "uPjvr": {
+          "enabled": false
+        },
+        "TWSg1": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "r9mAKo",
+      "type": "ref",
+      "ref": "Y1Wlgs",
+      "name": "Sidebar — Multiple projects, no workflows — Dark",
+      "x": 2888,
+      "y": 2220,
+      "theme": {
+        "mode": "dark"
+      },
+      "descendants": {
+        "Phye1": {
+          "fill": "#00000000"
+        },
+        "Ttafv": {
+          "icon": "chevron-right"
+        },
+        "N86f8z": {
+          "enabled": false
+        },
+        "D7kGC": {
+          "enabled": false
+        },
+        "osZUs": {
+          "enabled": false
+        },
+        "IAfFG": {
+          "enabled": false
+        },
+        "szs7m": {
+          "enabled": false
+        },
+        "uPjvr": {
+          "enabled": false
+        },
+        "TWSg1": {
+          "enabled": false
+        }
+      }
     }
   ],
   "themes": {

@@ -1233,7 +1233,7 @@ Key exports:
   required no migration, confirmed via `db:check`).
 * Per-step-type configuration schemas for all 8 MVP step types:
   `signin` (`{ email, password }` — see below), `signout` (`{}`), `wait`
-  (`{ seconds: integer >= 1, <= 3600 }`), `insert` (`{ table, values:
+  (`{ seconds: integer >= 1, <= 300 }`), `insert` (`{ table, values:
   nonempty JSON object }`), `read` (`{ table, columns?, limit? <= 1000
   }`), `update` (`{ table, values, filter: { column, operator: 'eq',
   value } }`), `delete` (`{ table, filter }` — `filter` is required,

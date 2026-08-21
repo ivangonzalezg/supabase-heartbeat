@@ -10,6 +10,7 @@ import { rootRoute } from "./root-route"
 import { dashboardLayoutRoute } from "./dashboard-layout-route"
 import { indexRoute } from "./routes/index-route"
 import { createProjectRoute } from "./routes/create-project-route"
+import { createWorkflowRoute } from "./routes/create-workflow-route"
 import { signInRoute } from "./routes/sign-in-route"
 import { ThemeProvider } from "@/shared/lib/theme-provider"
 
@@ -21,10 +22,10 @@ vi.mock("@/entities/session", () => ({
   useSessionContext: useSessionContextMock,
 }))
 
-function mockFetch() {
+function mockFetch(body: unknown = { projects: [], workflows: [] }) {
   const fetchMock = vi.fn(() =>
     Promise.resolve(
-      new Response(JSON.stringify({ projects: [], workflows: [] }), {
+      new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -36,7 +37,11 @@ function mockFetch() {
 
 function renderApp(initialEntries: string[] = ["/"]) {
   const routeTree = rootRoute.addChildren([
-    dashboardLayoutRoute.addChildren([indexRoute, createProjectRoute]),
+    dashboardLayoutRoute.addChildren([
+      indexRoute,
+      createProjectRoute,
+      createWorkflowRoute,
+    ]),
     signInRoute,
   ])
   const router = createRouter({
@@ -84,6 +89,31 @@ describe("router integration", () => {
 
     expect(
       await screen.findByRole("heading", { name: "Create project" })
+    ).toBeInTheDocument()
+  })
+
+  it("renders the create-workflow page at /projects/:projectId/workflows/new", async () => {
+    mockFetch({
+      projects: [
+        {
+          id: "project-1",
+          ownerId: "user-1",
+          name: "Artemivo",
+          description: null,
+          supabaseUrl: "https://example.supabase.co",
+          publishableKey: "sb_publishable_example",
+          enabled: true,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      workflows: [],
+    })
+
+    renderApp(["/projects/project-1/workflows/new"])
+
+    expect(
+      await screen.findByRole("heading", { name: "Create workflow" })
     ).toBeInTheDocument()
   })
 })

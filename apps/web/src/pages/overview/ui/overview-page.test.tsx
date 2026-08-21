@@ -38,7 +38,15 @@ function renderOverviewPage() {
     path: "/projects/new",
     component: () => null,
   })
-  const routeTree = rootRoute.addChildren([createProjectStub])
+  const createWorkflowStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/$projectId/workflows/new",
+    component: () => null,
+  })
+  const routeTree = rootRoute.addChildren([
+    createProjectStub,
+    createWorkflowStub,
+  ])
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/"] }),
