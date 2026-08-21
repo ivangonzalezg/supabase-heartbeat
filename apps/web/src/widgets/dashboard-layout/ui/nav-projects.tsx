@@ -37,7 +37,7 @@ function ProjectGroup({
             <SidebarMenuSubItem key={workflow.id}>
               {/* No route exists for a workflow yet — this row is
                   presentational only, no click handler, no href. */}
-              <SidebarMenuSubButton className="text-[11px]">
+              <SidebarMenuSubButton className="h-auto p-2.5 text-sm">
                 {workflow.name}
               </SidebarMenuSubButton>
             </SidebarMenuSubItem>
