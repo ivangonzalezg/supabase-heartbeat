@@ -28,11 +28,13 @@ import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import {
   WorkflowDetailResponseDto,
+  WorkflowOverviewResponseDto,
   WorkflowResponseDto,
 } from './dto/workflow-response.dto';
 import { WorkflowsService } from './workflows.service';
 import type {
   WorkflowDetailResponse,
+  WorkflowOverviewResponse,
   WorkflowResponse,
 } from './workflows.types';
 
@@ -130,6 +132,51 @@ export class WorkflowsController {
     @Param('workflowId') workflowId: string,
   ): Promise<WorkflowDetailResponse> {
     return this.workflowsService.findById(
+      toAuthenticatedActor(session),
+      projectId,
+      workflowId,
+    );
+  }
+
+  @Get(':workflowId/overview')
+  @ApiOperation({
+    summary:
+      "Read a workflow's complete overview: detail, steps, operational " +
+      'summary metrics, and its 10 most recent runs',
+    description:
+      'Both admin and viewer may call this. A strict superset of ' +
+      '`GET :workflowId` — includes everything that endpoint returns ' +
+      '(name, schedule, steps, ...) plus `metrics` (total runs, success ' +
+      'rate, failed runs, average duration, last run, next scheduled ' +
+      'run) and `recentRuns` (the 10 most recently created runs, most ' +
+      'recent first). `metrics.successRate` is the percentage of ' +
+      'concluded runs (excluding `pending`/`running`) that ended ' +
+      '`success`, `null` if none have concluded yet. `metrics.nextRun` ' +
+      'is `null` whenever the workflow is disabled — scheduling does ' +
+      'not apply to a disabled workflow. Intended for a single-page ' +
+      'workflow overview UI that would otherwise need this endpoint ' +
+      'plus a separate runs-list/metrics request. A workflow that does ' +
+      'not exist, belongs to a different project, or whose project is ' +
+      'owned by another user is reported as 404, identically in every ' +
+      'case.',
+  })
+  @ApiOkResponse({
+    description:
+      'The requested workflow, including its ordered steps, operational ' +
+      'summary metrics, and 10 most recent runs.',
+    type: WorkflowOverviewResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description:
+      'The project or workflow does not exist, or is not accessible to ' +
+      'the current actor.',
+  })
+  async findOverview(
+    @Session() session: UserSession,
+    @Param('projectId') projectId: string,
+    @Param('workflowId') workflowId: string,
+  ): Promise<WorkflowOverviewResponse> {
+    return this.workflowsService.findOverview(
       toAuthenticatedActor(session),
       projectId,
       workflowId,

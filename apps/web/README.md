@@ -111,6 +111,28 @@ composing widget/page's responsibility (`widgets/dashboard-layout`'s
 sidebar and `pages/overview` both pass `isAuthenticated` from
 `useSessionContext()` into the hooks independently).
 
+`pages/workflow-overview` (route
+`/projects/$projectId/workflows/$workflowId`, reached from the sidebar
+or after creating a workflow) shows a single workflow's name, enabled
+status, ordered steps, operational-summary metrics, and its 10 most
+recent runs. It uses two hooks together: `entities/workflow`'s existing
+`useWorkflow` (from `GET /api/projects/:projectId/workflows/:workflowId`)
+is called purely as a prefill/instant-paint mechanism — whatever's
+already cached from wherever the user navigated in from lets the header
+and step list render immediately — while `useWorkflowOverview` (from the
+newer, complete `GET .../workflows/:workflowId/overview` endpoint) is
+the actual source of truth for the whole page, including metrics and
+recent runs that `useWorkflow` doesn't carry. The operational-summary
+card and recent-runs table each render their own skeleton
+(`operational-summary-skeleton.tsx` / `recent-runs-table-skeleton.tsx`)
+while `useWorkflowOverview` is pending, independent of `useWorkflow`'s
+own loading state — no `useTransition`, just each query's own
+`isPending`/`isError`/success branch. Duration and relative-timestamp
+formatting (`"3.6s"`, `"Today, 09:00 AM"`) live in
+`pages/workflow-overview/lib/format-duration.ts` and
+`format-run-timestamp.ts`, shared between the summary card and the runs
+table.
+
 Cross-layer dependency rules (for example, `entities` must not import from
 `pages`) are enforced by [steiger](https://github.com/feature-sliced/steiger)
 with the official `@feature-sliced/steiger-plugin`, `recommended` preset
@@ -271,17 +293,8 @@ made blind:
 * A full dashboard for managing Supabase projects and workflows, under
   `pages/` — `pages/overview` today only shows a welcome message and
   project/workflow counts.
-* Route-driven project/workflow selection (e.g. `/projects/$projectId`,
-  `/workflows/$workflowId`) — `widgets/dashboard-layout`'s sidebar
-  already lists real projects/workflows with expand/collapse, but
-  clicking a row doesn't navigate anywhere yet; only `/` and `/sign-in`
-  exist as routes. Detail routes are a separate, not-yet-scoped task.
 * A working "New project" action — the sidebar's button is rendered
   `disabled` today, with no route to navigate to.
-* Per-workflow step fetching, and any execution stats/next-run times — the
-  summary hooks expose every `Project`/`Workflow` field except a
-  workflow's `steps`; detail pages will fetch steps and execution data
-  separately, with their own loading states.
 
 ## Conventions
 

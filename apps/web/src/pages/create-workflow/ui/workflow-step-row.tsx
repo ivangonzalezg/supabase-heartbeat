@@ -5,6 +5,7 @@ import type {
 } from "@supabase-heartbeat/validation"
 import { useSortable } from "@dnd-kit/react/sortable"
 import { GripVerticalIcon, XIcon } from "lucide-react"
+import { summarizeStep } from "@/entities/workflow"
 import {
   AccordionContent,
   AccordionItem,
@@ -32,7 +33,6 @@ import {
   UpdateStepFields,
   WaitStepFields,
   defaultStepFor,
-  summarizeStep,
 } from "./step-config-forms"
 
 const typeLabels: Record<WorkflowStepCreateInput["type"], string> = {
@@ -134,7 +134,7 @@ export function WorkflowStepRow({ id, index, onRemove }: WorkflowStepRowProps) {
                 <div className="flex size-5.5 shrink-0 items-center justify-center rounded-full bg-sidebar-primary font-mono text-[8px] leading-2 font-bold text-primary">
                   {index + 1}
                 </div>
-                <p className="font-mono text-xs font-bold text-foreground">
+                <p className="text-xs font-bold text-foreground">
                   {step.stepKey || `step_${index + 1}`}
                 </p>
               </div>

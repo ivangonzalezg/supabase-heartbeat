@@ -1,5 +1,9 @@
 import type { WorkflowOverlapPolicy } from '../../database/schema/types';
 import type { WorkflowStepResponse } from './steps/workflow-steps.types';
+import type {
+  WorkflowRunListItem,
+  WorkflowRunSummaryMetrics,
+} from './runs/workflow-runs.types';
 
 /**
  * The public HTTP representation of a workflow. Mapped by hand from the
@@ -36,4 +40,18 @@ export interface WorkflowResponse {
  */
 export interface WorkflowDetailResponse extends WorkflowResponse {
   steps: WorkflowStepResponse[];
+}
+
+/**
+ * A strict superset of `WorkflowDetailResponse` — full workflow detail
+ * (including steps) plus operational-summary metrics and the last 10
+ * runs, all in one payload. This is the single source of truth for the
+ * frontend's workflow-overview page: unlike `WorkflowDetailResponse`, it
+ * needs no second request to show metrics/recent runs. `metrics.nextRun`
+ * is `null` whenever the workflow is disabled (see
+ * `WorkflowsService.findOverview`).
+ */
+export interface WorkflowOverviewResponse extends WorkflowDetailResponse {
+  metrics: WorkflowRunSummaryMetrics;
+  recentRuns: WorkflowRunListItem[];
 }

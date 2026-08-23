@@ -5,6 +5,7 @@ import { WorkflowsController } from './workflows.controller';
 import { WorkflowsService } from './workflows.service';
 import type {
   WorkflowDetailResponse,
+  WorkflowOverviewResponse,
   WorkflowResponse,
 } from './workflows.types';
 
@@ -33,10 +34,24 @@ const sampleWorkflowDetail: WorkflowDetailResponse = {
   steps: [],
 };
 
+const sampleWorkflowOverview: WorkflowOverviewResponse = {
+  ...sampleWorkflowDetail,
+  metrics: {
+    totalRuns: 0,
+    successRate: null,
+    failedRuns: 0,
+    avgDurationMs: null,
+    lastRun: null,
+    nextRun: null,
+  },
+  recentRuns: [],
+};
+
 const mockWorkflowsService = {
   list: jest.fn<WorkflowsService['list']>(),
   create: jest.fn<WorkflowsService['create']>(),
   findById: jest.fn<WorkflowsService['findById']>(),
+  findOverview: jest.fn<WorkflowsService['findOverview']>(),
   update: jest.fn<WorkflowsService['update']>(),
   delete: jest.fn<WorkflowsService['delete']>(),
 };
@@ -113,6 +128,23 @@ describe('WorkflowsController', () => {
       'workflow-1',
     );
     expect(result).toEqual(sampleWorkflowDetail);
+  });
+
+  it('findOverview() delegates to the service with the actor, project ID, and workflow ID', async () => {
+    mockWorkflowsService.findOverview.mockResolvedValue(sampleWorkflowOverview);
+
+    const result = await controller.findOverview(
+      buildSession('viewer'),
+      'project-1',
+      'workflow-1',
+    );
+
+    expect(mockWorkflowsService.findOverview).toHaveBeenCalledWith(
+      { userId: 'user-1', role: 'viewer' },
+      'project-1',
+      'workflow-1',
+    );
+    expect(result).toEqual(sampleWorkflowOverview);
   });
 
   it('update() delegates to the service with the actor, project ID, workflow ID, and input', async () => {

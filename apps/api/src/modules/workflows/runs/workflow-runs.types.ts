@@ -47,3 +47,46 @@ export interface WorkflowRunDetailResponse {
   error: string | null;
   stepRuns: StepRunResponse[];
 }
+
+/**
+ * Aggregate operational-summary metrics for one workflow's run history,
+ * computed over all of its `workflow_runs` rows (not just the bounded
+ * `recentRuns` list returned alongside it — see `WorkflowOverviewResponse`
+ * in `../workflows.types.ts`).
+ *
+ * `successRate` counts every run that has left the active
+ * (`pending`/`running`) lifecycle in its denominator — `success / (success
+ * + failed + cancelled + skipped)` — so in-flight runs never distort the
+ * ratio; `null` when that denominator is 0 (no concluded runs yet).
+ * `avgDurationMs` is computed only over runs where both `startedAt` and
+ * `finishedAt` are set; `null` if none qualify. `nextRun` is always
+ * assembled by the caller (`WorkflowsService.findOverview`), which has
+ * the workflow row's `cronExpression`/`timezone`/`enabled` needed to
+ * compute it — this service only ever returns `null` for it.
+ */
+export interface WorkflowRunSummaryMetrics {
+  totalRuns: number;
+  successRate: number | null;
+  failedRuns: number;
+  avgDurationMs: number | null;
+  lastRun: Date | null;
+  nextRun: Date | null;
+}
+
+/**
+ * One row of the bounded (last 10) recent-runs list. `failedStepKey` is
+ * the `stepKey` of the step whose `step_runs` row has `status: 'failed'`
+ * for this run, resolved via a single batched query across the whole
+ * page of runs (never N+1) — `null` for any non-failed run, or for a
+ * failed run with no matching `step_runs` row (defensive; not expected
+ * given today's execution flow, see `resolveFailedSteps`).
+ */
+export interface WorkflowRunListItem {
+  id: string;
+  status: WorkflowRunStatus;
+  triggerType: WorkflowRunTriggerType;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  durationMs: number | null;
+  failedStepKey: string | null;
+}

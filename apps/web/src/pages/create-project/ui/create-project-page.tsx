@@ -1,6 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
-import { ArrowLeftIcon } from "lucide-react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 import * as z from "zod"
@@ -72,13 +71,6 @@ export function CreateProjectPage() {
       className="flex min-h-full flex-col gap-6 p-6"
     >
       <div className="flex flex-col gap-4">
-        <Link
-          to="/"
-          className="flex w-fit items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeftIcon className="size-3.5" />
-          Back to overview
-        </Link>
         <div>
           <h1 className="text-2xl font-bold text-foreground">Create project</h1>
           <p className="text-sm text-muted-foreground">

@@ -59,6 +59,7 @@ describe("useCreateWorkflow", () => {
     result.current.mutate(input)
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.id).toBe("workflow-1")
 
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/projects/project-1/workflows",

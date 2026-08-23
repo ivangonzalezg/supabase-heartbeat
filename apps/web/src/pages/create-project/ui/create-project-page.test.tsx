@@ -78,7 +78,7 @@ describe("CreateProjectPage", () => {
     vi.mocked(toast.error).mockReset()
   })
 
-  it("renders the page header and a back link to the overview", async () => {
+  it("renders the page header", async () => {
     mockFetch(jsonResponse({}))
     renderCreateProjectPage()
 
@@ -90,9 +90,6 @@ describe("CreateProjectPage", () => {
         "Connect a Supabase project before creating workflows and scheduling activity."
       )
     ).toBeInTheDocument()
-
-    const backLink = screen.getByRole("link", { name: /Back to overview/ })
-    expect(backLink).toHaveAttribute("href", "/")
   })
 
   it("renders the project details, connection, and status fields", async () => {

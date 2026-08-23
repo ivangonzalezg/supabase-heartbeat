@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { and, asc, desc, eq, exists } from 'drizzle-orm';
+import { CronJob } from 'cron';
 import type { JsonValue } from '@supabase-heartbeat/validation';
 import { DatabaseService } from '../../database/database.service';
 import { projects, workflows, workflowSteps } from '../../database/schema';
@@ -18,14 +19,19 @@ import {
 import { WorkflowNotFoundError } from './workflows.errors';
 import type {
   WorkflowDetailResponse,
+  WorkflowOverviewResponse,
   WorkflowResponse,
 } from './workflows.types';
 import type { WorkflowStepResponse } from './steps/workflow-steps.types';
 import { validateWorkflowReferences } from './references/validate-workflow-references';
+import { WorkflowRunsService } from './runs/workflow-runs.service';
 
 @Injectable()
 export class WorkflowsService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly workflowRunsService: WorkflowRunsService,
+  ) {}
 
   private get db() {
     return this.databaseService.db;
@@ -155,6 +161,58 @@ export class WorkflowsService {
       ...toWorkflowResponse(row),
       steps: stepRows.map(toWorkflowStepResponse),
     };
+  }
+
+  /**
+   * A strict superset of `findById`: the same workflow detail (including
+   * steps) plus operational-summary metrics and the last 10 runs, so a
+   * page needing both never issues two requests. `nextRun` is computed
+   * here (not in `WorkflowRunsService.getSummaryMetrics`, which has no
+   * access to the workflow row) via the `cron` package, purely as a
+   * date-math utility — the returned `CronJob` is never `.start()`ed, so
+   * this introduces no scheduler. Always `null` when the workflow is
+   * disabled, checked before `cron` is ever invoked.
+   */
+  async findOverview(
+    actor: AuthenticatedActor,
+    projectId: string,
+    workflowId: string,
+  ): Promise<WorkflowOverviewResponse> {
+    const detail = await this.findById(actor, projectId, workflowId);
+    const { metrics, recentRuns } =
+      await this.workflowRunsService.getSummaryMetrics(workflowId);
+
+    return {
+      ...detail,
+      metrics: {
+        ...metrics,
+        nextRun: this.computeNextRun(detail),
+      },
+      recentRuns,
+    };
+  }
+
+  private computeNextRun(
+    workflow: Pick<WorkflowResponse, 'cronExpression' | 'timezone' | 'enabled'>,
+  ): Date | null {
+    if (!workflow.enabled) {
+      return null;
+    }
+    try {
+      const job = CronJob.from({
+        cronTime: workflow.cronExpression,
+        timeZone: workflow.timezone,
+        // `onTick` is required by the type signature but never invoked —
+        // this `CronJob` is never `.start()`ed, only used for its
+        // `.nextDate()` date-math utility. No scheduler is introduced.
+        onTick: () => {},
+      });
+      return job.nextDate().toJSDate();
+    } catch {
+      // Defensive: cronExpression is already validated at write time
+      // (IsCronExpression), so this should be unreachable in practice.
+      return null;
+    }
   }
 
   async update(

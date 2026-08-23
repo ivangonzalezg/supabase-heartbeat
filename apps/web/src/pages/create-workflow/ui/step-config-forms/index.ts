@@ -1,5 +1,4 @@
 export { defaultStepFor, emptyStepFor } from "./default-step"
-export { summarizeStep } from "./step-summary"
 export { SigninStepFields } from "./signin-step-fields"
 export { WaitStepFields } from "./wait-step-fields"
 export { InsertStepFields } from "./insert-step-fields"

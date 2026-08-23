@@ -4,6 +4,7 @@ import { dashboardLayoutRoute } from "./dashboard-layout-route"
 import { indexRoute } from "./routes/index-route"
 import { createProjectRoute } from "./routes/create-project-route"
 import { createWorkflowRoute } from "./routes/create-workflow-route"
+import { workflowOverviewRoute } from "./routes/workflow-overview-route"
 import { signInRoute } from "./routes/sign-in-route"
 
 const routeTree = rootRoute.addChildren([
@@ -11,6 +12,7 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     createProjectRoute,
     createWorkflowRoute,
+    workflowOverviewRoute,
   ]),
   signInRoute,
 ])

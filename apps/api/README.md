@@ -962,18 +962,41 @@ headers, or authentication material in a persisted or returned message.
 ## Workflow Runs API
 
 `POST /api/projects/:projectId/workflows/:workflowId/runs`
-(`src/modules/workflows/runs/`, admin only) is the first, and currently
-only, way to execute a workflow: a synchronous, manually triggered run.
-There is no scheduler, no cron-triggered execution, no background
-worker, and no queue — the HTTP request itself performs the run and the
-connection stays open until it finishes. The response is
-`201 Created` whenever a run record was successfully created and
-completed its execution attempt, **regardless of whether the run itself
-ended in `success` or `failed`** — check `body.status`, not the HTTP
-status code, to know whether the workflow logic succeeded. A `404` or
-`403` means no run was created at all (ownership/role failure before
-execution began); a `5xx` means an unexpected server error, not a
-failed workflow.
+(`src/modules/workflows/runs/`, admin only) is the only way to execute a
+workflow: a synchronous, manually triggered run. There is no scheduler,
+no cron-triggered execution, no background worker, and no queue — the
+HTTP request itself performs the run and the connection stays open until
+it finishes. The response is `201 Created` whenever a run record was
+successfully created and completed its execution attempt, **regardless
+of whether the run itself ended in `success` or `failed`** — check
+`body.status`, not the HTTP status code, to know whether the workflow
+logic succeeded. A `404` or `403` means no run was created at all
+(ownership/role failure before execution began); a `5xx` means an
+unexpected server error, not a failed workflow.
+
+`GET /api/projects/:projectId/workflows/:workflowId/overview`
+(`src/modules/workflows/`, both admin and viewer) returns everything a
+single-page workflow overview UI needs in one request: the same fields
+as `GET :workflowId` (name, schedule, ordered steps, ...) plus a
+`metrics` object and a `recentRuns` array. `metrics.totalRuns` and
+`metrics.failedRuns` are plain counts over every `workflow_runs` row for
+the workflow. `metrics.successRate` is the percentage (0-100, one
+decimal) of *concluded* runs — every run whose status has left the
+active `pending`/`running` lifecycle (`success`, `failed`, `cancelled`,
+or `skipped`) — that ended `success`; `null` if no run has concluded
+yet, so in-flight runs never distort the ratio. `metrics.avgDurationMs`
+averages `finishedAt - startedAt` only over runs where both timestamps
+are set; `null` if none qualify. `metrics.lastRun` is the most recent
+run's `startedAt`, `null` if the workflow has never run.
+`metrics.nextRun` is the next cron occurrence, computed on the fly from
+`cronExpression`/`timezone` via the `cron` package (used purely as a
+date-math utility here — the `CronJob` it constructs is never started,
+so this introduces no scheduler); it is always `null` when the workflow
+is disabled, since scheduling does not apply to a disabled workflow.
+`recentRuns` holds the 10 most recently created runs, most recent first;
+each entry's `failedStepKey` is the `stepKey` of the step that failed
+(resolved via `workflow_steps`), `null` for a non-failed run or a failed
+run with no resolvable failed step.
 
 **Ownership** is proven through the same hierarchy pattern as the rest
 of the Workflows API (`projects.id = :projectId AND projects.owner_id =
@@ -1205,10 +1228,12 @@ references are intended primarily for cleanup flows within one run
 
 **Not implemented by this endpoint**: overlap prevention (nothing stops
 two concurrent manual runs of the same workflow), distributed locks,
-automatic retries, cancellation, timeouts, preflight/dry-run validation
-of remote execution outcomes, and run-history read endpoints (`GET`
-list/detail for past runs). The response body of the `POST` call is
-currently the only way to see a run's results.
+automatic retries, cancellation, timeouts, and preflight/dry-run
+validation of remote execution outcomes. The response body of the
+`POST` call is the only way to see one run's full detail (including its
+step-by-step `stepRuns`) — `GET :workflowId/overview` (below) covers
+only a fixed last-10 summary view (aggregate metrics plus a bounded run
+list), not arbitrary pagination or a single-run detail-by-ID lookup.
 
 ## Shared validation package
 
@@ -1415,6 +1440,7 @@ DELETE /api/projects/:projectId          # Delete an owned project (admin only)
 GET    /api/projects/:projectId/workflows                                 # List workflows in an owned project (lightweight, no steps)
 POST   /api/projects/:projectId/workflows                                 # Create a workflow with its complete ordered steps, transactionally (admin only)
 GET    /api/projects/:projectId/workflows/:workflowId                     # Read a workflow and its ordered steps in an owned project
+GET    /api/projects/:projectId/workflows/:workflowId/overview            # Workflow detail + operational summary metrics + last 10 runs
 PATCH  /api/projects/:projectId/workflows/:workflowId                     # Partially update a workflow (admin only)
 DELETE /api/projects/:projectId/workflows/:workflowId                     # Delete a workflow and its steps (admin only)
 GET    /api/projects/:projectId/workflows/:workflowId/steps               # List a workflow's steps

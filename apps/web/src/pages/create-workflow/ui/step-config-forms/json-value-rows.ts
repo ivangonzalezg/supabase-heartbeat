@@ -1,3 +1,4 @@
+import { stringifyJsonValue } from "@/entities/workflow"
 import type { KeyValueRow } from "@/shared/ui"
 
 export function toRows(
@@ -33,8 +34,4 @@ export function parseJsonValue(raw: string): unknown {
   } catch {
     return raw
   }
-}
-
-export function stringifyJsonValue(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value)
 }

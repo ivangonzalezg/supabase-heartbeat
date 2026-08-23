@@ -7,9 +7,11 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from '../../database/schema';
 import type { AppDatabase } from '../../database/database.types';
 import type { AuthenticatedActor } from '../../lib/authorization/authorization.types';
+import { CronJob } from 'cron';
 import { WorkflowsService } from './workflows.service';
 import { WorkflowNotFoundError } from './workflows.errors';
 import { ProjectNotFoundError } from '../projects/projects.errors';
+import { WorkflowRunsService } from './runs/workflow-runs.service';
 
 function createTestDb(): { db: AppDatabase; connection: Database.Database } {
   const connection = new Database(':memory:');
@@ -93,7 +95,10 @@ describe('WorkflowsService', () => {
 
   beforeEach(async () => {
     ({ db, connection } = createTestDb());
-    service = new WorkflowsService({ db } as never);
+    service = new WorkflowsService(
+      { db } as never,
+      new WorkflowRunsService({ db } as never, {} as never, {} as never),
+    );
 
     adminA = await createUser(db, 'admin');
     adminB = await createUser(db, 'admin');
@@ -805,6 +810,119 @@ describe('WorkflowsService', () => {
       expect(await db.select().from(schema.workflowSteps)).toHaveLength(0);
       expect(await db.select().from(schema.workflowRuns)).toHaveLength(0);
       expect(await db.select().from(schema.stepRuns)).toHaveLength(0);
+    });
+  });
+
+  describe('findOverview', () => {
+    it('includes the workflow detail fields, including steps', async () => {
+      const created = await service.create(
+        adminAActor,
+        projectA.id,
+        validCreateInput,
+      );
+
+      const overview = await service.findOverview(
+        adminAActor,
+        projectA.id,
+        created.id,
+      );
+
+      expect(overview.id).toBe(created.id);
+      expect(overview.name).toBe(validCreateInput.name);
+      expect(overview.steps).toHaveLength(1);
+    });
+
+    it('includes empty-default metrics and no runs for a workflow with no runs', async () => {
+      const created = await service.create(
+        adminAActor,
+        projectA.id,
+        validCreateInput,
+      );
+
+      const overview = await service.findOverview(
+        adminAActor,
+        projectA.id,
+        created.id,
+      );
+
+      expect(overview.metrics.totalRuns).toBe(0);
+      expect(overview.metrics.successRate).toBeNull();
+      expect(overview.recentRuns).toEqual([]);
+    });
+
+    it('computes nextRun from the cron expression when the workflow is enabled', async () => {
+      const created = await service.create(adminAActor, projectA.id, {
+        ...validCreateInput,
+        cronExpression: '0 9 * * *',
+        timezone: 'UTC',
+        enabled: true,
+      });
+
+      const overview = await service.findOverview(
+        adminAActor,
+        projectA.id,
+        created.id,
+      );
+
+      const expected = CronJob.from({
+        cronTime: '0 9 * * *',
+        timeZone: 'UTC',
+        onTick: () => {},
+      })
+        .nextDate()
+        .toJSDate();
+
+      expect(overview.metrics.nextRun).not.toBeNull();
+      // Allow a small tolerance since the expected value is computed a
+      // moment after the service's own call.
+      expect(
+        Math.abs(
+          (overview.metrics.nextRun as Date).getTime() - expected.getTime(),
+        ),
+      ).toBeLessThan(2000);
+    });
+
+    it('returns a null nextRun when the workflow is disabled', async () => {
+      const created = await service.create(adminAActor, projectA.id, {
+        ...validCreateInput,
+        enabled: false,
+      });
+
+      const overview = await service.findOverview(
+        adminAActor,
+        projectA.id,
+        created.id,
+      );
+
+      expect(overview.metrics.nextRun).toBeNull();
+    });
+
+    it('rejects another user reading it, with not found', async () => {
+      const created = await service.create(
+        adminAActor,
+        projectA.id,
+        validCreateInput,
+      );
+
+      await expect(
+        service.findOverview(adminBActor, projectA.id, created.id),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a nonexistent workflow with not found', async () => {
+      await expect(
+        service.findOverview(adminAActor, projectA.id, crypto.randomUUID()),
+      ).rejects.toThrow(WorkflowNotFoundError);
+    });
+
+    it('rejects a nonexistent project with not found', async () => {
+      await expect(
+        service.findOverview(
+          adminAActor,
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+        ),
+      ).rejects.toThrow(ProjectNotFoundError);
     });
   });
 });

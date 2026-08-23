@@ -11,7 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui"
-import { parseJsonValue, stringifyJsonValue } from "./json-value-rows"
+import { stringifyJsonValue } from "@/entities/workflow"
+import { parseJsonValue } from "./json-value-rows"
 
 export function FilterFields({ index }: { index: number }) {
   const { control } = useFormContext()

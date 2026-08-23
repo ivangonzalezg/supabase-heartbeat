@@ -69,7 +69,16 @@ function renderCreateWorkflowPage() {
     path: "/projects/$projectId/workflows/new",
     component: () => <CreateWorkflowPage />,
   })
-  const routeTree = rootRoute.addChildren([indexStub, createWorkflowStub])
+  const workflowOverviewStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/$projectId/workflows/$workflowId",
+    component: () => <div>Workflow overview page</div>,
+  })
+  const routeTree = rootRoute.addChildren([
+    indexStub,
+    createWorkflowStub,
+    workflowOverviewStub,
+  ])
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({
@@ -101,18 +110,13 @@ describe("CreateWorkflowPage", () => {
     vi.mocked(toast.error).mockReset()
   })
 
-  it("renders the header with the resolved project name", async () => {
+  it("renders the header", async () => {
     mockFetch()
     renderCreateWorkflowPage()
 
     expect(
       await screen.findByRole("heading", { name: "Create workflow" })
     ).toBeInTheDocument()
-
-    const backLink = await screen.findByRole("link", {
-      name: /Back to Artemivo/,
-    })
-    expect(backLink).toHaveAttribute("href", "/")
   })
 
   it("renders the details, schedule, and status cards", async () => {
@@ -239,9 +243,9 @@ describe("CreateWorkflowPage", () => {
     expect(body.steps[0].type).toBe("wait")
     expect(body.steps[0].configuration.seconds).toBe(45)
 
-    await waitFor(() => {
-      expect(screen.getByText("Overview page")).toBeInTheDocument()
-    })
+    await waitFor(() =>
+      expect(screen.getByText("Workflow overview page")).toBeInTheDocument()
+    )
   })
 
   it("sends a numeric filter value as a number, not a string", async () => {

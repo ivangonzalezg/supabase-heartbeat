@@ -1,6 +1,6 @@
 import * as React from "react"
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
-import { Link } from "@tanstack/react-router"
+import { Link, useMatches } from "@tanstack/react-router"
 import { useSessionContext } from "@/entities/session"
 import { useProjects, type Project } from "@/entities/project"
 import { useWorkflows, type Workflow } from "@/entities/workflow"
@@ -13,32 +13,53 @@ import {
   SidebarMenuSubItem,
 } from "@/shared/ui"
 
+function useActiveWorkflowId() {
+  const matches = useMatches()
+  const match = matches.find(
+    (m) => typeof (m.params as Record<string, unknown>).workflowId === "string"
+  )
+  return (match?.params as { workflowId?: string } | undefined)?.workflowId
+}
+
 function ProjectGroup({
   project,
   workflows,
+  activeWorkflowId,
 }: {
   project: Project
   workflows: Workflow[]
+  activeWorkflowId: string | undefined
 }) {
-  const [expanded, setExpanded] = React.useState(false)
+  const hasActiveWorkflow = workflows.some((w) => w.id === activeWorkflowId)
+  const [expandedOverride, setExpandedOverride] = React.useState<
+    boolean | null
+  >(null)
+  const expanded = expandedOverride ?? hasActiveWorkflow
 
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        onClick={() => setExpanded((e) => !e)}
+        onClick={() => setExpandedOverride(!expanded)}
         className="h-auto"
       >
         {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
         <span className="truncate">{project.name}</span>
       </SidebarMenuButton>
       {expanded && workflows.length ? (
-        <SidebarMenuSub>
+        <SidebarMenuSub className="mr-0 pr-0">
           {workflows.map((workflow) => (
             <SidebarMenuSubItem key={workflow.id}>
-              {/* No route exists for a workflow yet — this row is
-                  presentational only, no click handler, no href. */}
-              <SidebarMenuSubButton className="h-auto p-2.5 text-sm">
-                {workflow.name}
+              <SidebarMenuSubButton
+                asChild
+                isActive={workflow.id === activeWorkflowId}
+                className="h-auto p-2.5 text-sm data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground"
+              >
+                <Link
+                  to="/projects/$projectId/workflows/$workflowId"
+                  params={{ projectId: project.id, workflowId: workflow.id }}
+                >
+                  {workflow.name}
+                </Link>
               </SidebarMenuSubButton>
             </SidebarMenuSubItem>
           ))}
@@ -54,6 +75,7 @@ export function NavProjects() {
   const workflowsQuery = useWorkflows(isAuthenticated)
   const projects = projectsQuery.data ?? []
   const workflows = workflowsQuery.data ?? []
+  const activeWorkflowId = useActiveWorkflowId()
 
   return (
     <>
@@ -63,6 +85,7 @@ export function NavProjects() {
             key={project.id}
             project={project}
             workflows={workflows.filter((w) => w.projectId === project.id)}
+            activeWorkflowId={activeWorkflowId}
           />
         ))}
       </SidebarMenu>

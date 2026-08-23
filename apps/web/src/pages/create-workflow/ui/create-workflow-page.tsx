@@ -1,11 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, FormProvider, useForm } from "react-hook-form"
-import { ArrowLeftIcon } from "lucide-react"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { toast } from "sonner"
 import * as z from "zod"
 import { workflowStepCreateSchema } from "@supabase-heartbeat/validation"
-import { useProjects } from "@/entities/project"
 import { useCreateWorkflow } from "@/entities/workflow"
 import {
   Button,
@@ -67,8 +65,6 @@ export function CreateWorkflowPage() {
     strict: false,
   }) as { projectId: string }
   const navigate = useNavigate()
-  const projectsQuery = useProjects(true)
-  const project = projectsQuery.data?.find((p) => p.id === projectId)
   const createWorkflow = useCreateWorkflow()
 
   const form = useForm({
@@ -95,12 +91,15 @@ export function CreateWorkflowPage() {
 
   const onSubmit = async (values: CreateWorkflowValues) => {
     try {
-      await createWorkflow.mutateAsync({
+      const created = await createWorkflow.mutateAsync({
         ...values,
         projectId,
         description: values.description || undefined,
       })
-      void navigate({ to: "/" })
+      void navigate({
+        to: "/projects/$projectId/workflows/$workflowId",
+        params: { projectId, workflowId: created.id },
+      })
     } catch {
       toast.error("Failed to create workflow", {
         description: "Check your workflow details and try again.",
@@ -115,13 +114,6 @@ export function CreateWorkflowPage() {
         className="flex min-h-full flex-col gap-6 p-6"
       >
         <div className="flex flex-col gap-4">
-          <Link
-            to="/"
-            className="flex w-fit items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            Back to {project?.name ?? "overview"}
-          </Link>
           <div>
             <h1 className="text-2xl font-bold text-foreground">
               Create workflow

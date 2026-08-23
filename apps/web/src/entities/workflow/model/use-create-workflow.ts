@@ -16,7 +16,16 @@ export interface CreateWorkflowInput {
   steps: WorkflowStepCreateInput[]
 }
 
-async function createWorkflow({ projectId, ...body }: CreateWorkflowInput) {
+export interface CreateWorkflowResponse {
+  id: string
+  projectId: string
+  name: string
+}
+
+async function createWorkflow({
+  projectId,
+  ...body
+}: CreateWorkflowInput): Promise<CreateWorkflowResponse> {
   const response = await fetch(`/api/projects/${projectId}/workflows`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

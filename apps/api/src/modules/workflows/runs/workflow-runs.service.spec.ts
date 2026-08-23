@@ -106,6 +106,44 @@ async function createStep(
   return step;
 }
 
+async function createWorkflowRun(
+  db: AppDatabase,
+  workflowId: string,
+  overrides: Partial<schema.NewWorkflowRun> = {},
+) {
+  const [run] = await db
+    .insert(schema.workflowRuns)
+    .values({
+      id: crypto.randomUUID(),
+      workflowId,
+      triggerType: 'manual',
+      status: 'pending',
+      ...overrides,
+    })
+    .returning();
+  return run;
+}
+
+async function createStepRun(
+  db: AppDatabase,
+  workflowRunId: string,
+  workflowStepId: string,
+  overrides: Partial<schema.NewStepRun> = {},
+) {
+  const [stepRun] = await db
+    .insert(schema.stepRuns)
+    .values({
+      id: crypto.randomUUID(),
+      workflowRunId,
+      workflowStepId,
+      position: 0,
+      status: 'pending',
+      ...overrides,
+    })
+    .returning();
+  return stepRun;
+}
+
 function actorFor(user: {
   id: string;
   role: string | null;
@@ -2333,6 +2371,144 @@ describe('WorkflowRunsService', () => {
       await expect(
         service.executeManual(adminAActor, crypto.randomUUID(), workflowA.id),
       ).rejects.toThrow(ProjectNotFoundError);
+    });
+  });
+
+  describe('getSummaryMetrics', () => {
+    it('returns empty-default metrics and no runs when the workflow has none', async () => {
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.metrics.totalRuns).toBe(0);
+      expect(result.metrics.successRate).toBeNull();
+      expect(result.metrics.failedRuns).toBe(0);
+      expect(result.metrics.avgDurationMs).toBeNull();
+      expect(result.metrics.lastRun).toBeNull();
+      expect(result.recentRuns).toEqual([]);
+    });
+
+    it('computes totalRuns, failedRuns, and successRate over concluded runs only', async () => {
+      await createWorkflowRun(db, workflowA.id, { status: 'success' });
+      await createWorkflowRun(db, workflowA.id, { status: 'success' });
+      await createWorkflowRun(db, workflowA.id, { status: 'failed' });
+      await createWorkflowRun(db, workflowA.id, { status: 'cancelled' });
+      await createWorkflowRun(db, workflowA.id, { status: 'skipped' });
+      // pending/running must not distort the successRate denominator.
+      await createWorkflowRun(db, workflowA.id, { status: 'pending' });
+      await createWorkflowRun(db, workflowA.id, { status: 'running' });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.metrics.totalRuns).toBe(7);
+      expect(result.metrics.failedRuns).toBe(1);
+      // 2 success / (2 success + 1 failed + 1 cancelled + 1 skipped) = 2/5 = 40%
+      expect(result.metrics.successRate).toBe(40);
+    });
+
+    it('returns null successRate when no run has left the active lifecycle', async () => {
+      await createWorkflowRun(db, workflowA.id, { status: 'pending' });
+      await createWorkflowRun(db, workflowA.id, { status: 'running' });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.metrics.successRate).toBeNull();
+    });
+
+    it('computes avgDurationMs only over runs with both timestamps set', async () => {
+      const base = new Date('2026-01-01T00:00:00.000Z');
+      await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+        startedAt: base,
+        finishedAt: new Date(base.getTime() + 2000),
+      });
+      await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+        startedAt: base,
+        finishedAt: new Date(base.getTime() + 6000),
+      });
+      // No finishedAt: must be excluded from the average.
+      await createWorkflowRun(db, workflowA.id, {
+        status: 'running',
+        startedAt: base,
+      });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.metrics.avgDurationMs).toBe(4000);
+    });
+
+    it("sets lastRun to the most recently created run's startedAt", async () => {
+      const older = new Date('2026-01-01T00:00:00.000Z');
+      const newer = new Date('2026-01-02T00:00:00.000Z');
+      await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+        startedAt: older,
+        createdAt: older,
+      });
+      await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+        startedAt: newer,
+        createdAt: newer,
+      });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.metrics.lastRun).toEqual(newer);
+    });
+
+    it('returns at most the 10 most recently created runs, most recent first', async () => {
+      const base = new Date('2026-01-01T00:00:00.000Z');
+      for (let i = 0; i < 12; i++) {
+        await createWorkflowRun(db, workflowA.id, {
+          status: 'success',
+          createdAt: new Date(base.getTime() + i * 1000),
+        });
+      }
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.recentRuns).toHaveLength(10);
+      const timestamps = result.recentRuns.map((r) =>
+        r.startedAt ? r.startedAt.getTime() : 0,
+      );
+      expect([...timestamps].sort((a, b) => b - a)).toEqual(timestamps);
+    });
+
+    it('resolves failedStepKey for a failed run with a matching failed step_runs row', async () => {
+      const step = await createStep(db, workflowA.id, { stepKey: 'the_step' });
+      const run = await createWorkflowRun(db, workflowA.id, {
+        status: 'failed',
+      });
+      await createStepRun(db, run.id, step.id, { status: 'failed' });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.recentRuns[0].failedStepKey).toBe('the_step');
+    });
+
+    it('returns null failedStepKey for a failed run with no matching step_runs row', async () => {
+      await createWorkflowRun(db, workflowA.id, { status: 'failed' });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      expect(result.recentRuns[0].failedStepKey).toBeNull();
+    });
+
+    it('returns null failedStepKey for a successful run even if unrelated failed step_runs exist', async () => {
+      const step = await createStep(db, workflowA.id, { stepKey: 'the_step' });
+      const failedRun = await createWorkflowRun(db, workflowA.id, {
+        status: 'failed',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      await createStepRun(db, failedRun.id, step.id, { status: 'failed' });
+      await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      });
+
+      const result = await service.getSummaryMetrics(workflowA.id);
+
+      const successRun = result.recentRuns.find((r) => r.status === 'success');
+      expect(successRun?.failedStepKey).toBeNull();
     });
   });
 });

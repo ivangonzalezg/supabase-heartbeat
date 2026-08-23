@@ -1,5 +1,14 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, exists } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  sql,
+} from 'drizzle-orm';
 import type { JsonValue } from '@supabase-heartbeat/validation';
 import { DatabaseService } from '../../../database/database.service';
 import {
@@ -34,15 +43,23 @@ import { resolveStepReferences } from '../references/resolve-step-references';
 import type {
   StepRunResponse,
   WorkflowRunDetailResponse,
+  WorkflowRunListItem,
+  WorkflowRunSummaryMetrics,
 } from './workflow-runs.types';
 
+const RECENT_RUNS_LIMIT = 10;
+
 /**
- * Orchestrates one manual workflow execution end to end: verifies
- * ownership, creates the `workflow_runs` row, builds one isolated
- * execution context, runs every enabled step in ascending position
- * order through `StepExecutorRegistry`, persists a `step_runs` row per
- * attempted step, stops on the first failure, and finalizes the
- * `workflow_runs` row.
+ * Orchestrates one manual workflow execution end to end (`executeManual`):
+ * verifies ownership, creates the `workflow_runs` row, builds one
+ * isolated execution context, runs every enabled step in ascending
+ * position order through `StepExecutorRegistry`, persists a `step_runs`
+ * row per attempted step, stops on the first failure, and finalizes the
+ * `workflow_runs` row. Also serves read-only operational-summary
+ * metrics and the bounded recent-runs list (`getSummaryMetrics`), used
+ * by `WorkflowsService.findOverview` to assemble the combined
+ * workflow-overview response — no ownership check of its own, since
+ * that caller already proves ownership before calling in.
  *
  * Deliberately separate from `WorkflowsService`/`WorkflowStepsService`
  * (which own CRUD, not execution) — this is the only service in the
@@ -433,6 +450,164 @@ export class WorkflowRunsService {
         'Only admins may manually execute a workflow.',
       );
     }
+  }
+
+  /**
+   * Read-only operational-summary metrics plus the last
+   * `RECENT_RUNS_LIMIT` runs for one workflow — no ownership check here,
+   * since the caller (`WorkflowsService.findOverview`) already proves
+   * ownership before calling this. `successRate` counts every run that
+   * has left the active (`pending`/`running`) lifecycle in its
+   * denominator, so in-flight runs never distort the ratio.
+   */
+  async getSummaryMetrics(workflowId: string): Promise<{
+    metrics: WorkflowRunSummaryMetrics;
+    recentRuns: WorkflowRunListItem[];
+  }> {
+    const [statusCounts, avgDurationMs, lastRun, runs] = await Promise.all([
+      this.computeStatusCounts(workflowId),
+      this.computeAvgDuration(workflowId),
+      this.computeLastRun(workflowId),
+      this.db
+        .select()
+        .from(workflowRuns)
+        .where(eq(workflowRuns.workflowId, workflowId))
+        .orderBy(desc(workflowRuns.createdAt))
+        .limit(RECENT_RUNS_LIMIT),
+    ]);
+
+    const failedStepKeyByRunId = await this.resolveFailedSteps(
+      runs.filter((run) => run.status === 'failed').map((run) => run.id),
+    );
+
+    const concludedRuns =
+      statusCounts.success +
+      statusCounts.failed +
+      statusCounts.cancelled +
+      statusCounts.skipped;
+
+    return {
+      metrics: {
+        totalRuns: statusCounts.total,
+        successRate:
+          concludedRuns === 0
+            ? null
+            : Math.round((statusCounts.success / concludedRuns) * 1000) / 10,
+        failedRuns: statusCounts.failed,
+        avgDurationMs,
+        lastRun,
+        nextRun: null, // computed by the caller, which has the workflow row
+      },
+      recentRuns: runs.map((run) => ({
+        id: run.id,
+        status: run.status,
+        triggerType: run.triggerType,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        durationMs:
+          run.startedAt && run.finishedAt
+            ? run.finishedAt.getTime() - run.startedAt.getTime()
+            : null,
+        failedStepKey: failedStepKeyByRunId.get(run.id) ?? null,
+      })),
+    };
+  }
+
+  private async computeStatusCounts(workflowId: string): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    cancelled: number;
+    skipped: number;
+  }> {
+    const rows = await this.db
+      .select({
+        status: workflowRuns.status,
+        count: sql<number>`count(*)`,
+      })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.workflowId, workflowId))
+      .groupBy(workflowRuns.status);
+
+    const counts = {
+      total: 0,
+      success: 0,
+      failed: 0,
+      cancelled: 0,
+      skipped: 0,
+    };
+    for (const row of rows) {
+      const count = Number(row.count);
+      counts.total += count;
+      if (row.status === 'success') counts.success += count;
+      if (row.status === 'failed') counts.failed += count;
+      if (row.status === 'cancelled') counts.cancelled += count;
+      if (row.status === 'skipped') counts.skipped += count;
+    }
+    return counts;
+  }
+
+  private async computeAvgDuration(workflowId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({
+        avgSeconds: sql<
+          number | null
+        >`avg(${workflowRuns.finishedAt} - ${workflowRuns.startedAt})`,
+      })
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.workflowId, workflowId),
+          isNotNull(workflowRuns.startedAt),
+          isNotNull(workflowRuns.finishedAt),
+        ),
+      );
+
+    if (row?.avgSeconds == null) {
+      return null;
+    }
+    return Math.round(Number(row.avgSeconds) * 1000);
+  }
+
+  private async computeLastRun(workflowId: string): Promise<Date | null> {
+    const [row] = await this.db
+      .select({ startedAt: workflowRuns.startedAt })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.workflowId, workflowId))
+      .orderBy(desc(workflowRuns.createdAt))
+      .limit(1);
+
+    return row?.startedAt ?? null;
+  }
+
+  private async resolveFailedSteps(
+    failedRunIds: string[],
+  ): Promise<Map<string, string>> {
+    if (failedRunIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .select({
+        workflowRunId: stepRuns.workflowRunId,
+        stepKey: workflowSteps.stepKey,
+      })
+      .from(stepRuns)
+      .innerJoin(workflowSteps, eq(stepRuns.workflowStepId, workflowSteps.id))
+      .where(
+        and(
+          inArray(stepRuns.workflowRunId, failedRunIds),
+          eq(stepRuns.status, 'failed'),
+        ),
+      );
+
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      if (!map.has(row.workflowRunId)) {
+        map.set(row.workflowRunId, row.stepKey);
+      }
+    }
+    return map;
   }
 }
 

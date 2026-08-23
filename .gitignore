@@ -50,3 +50,5 @@ Thumbs.db
 
 # Persistent agent task reports
 .agent-reports/
+
+docs/superpowers
