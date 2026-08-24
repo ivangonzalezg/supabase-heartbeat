@@ -30,6 +30,11 @@ async function renderWithRouter(
   props: React.ComponentProps<typeof WorkflowHeader>
 ) {
   const rootRoute = createRootRoute({ component: () => <Outlet /> })
+  const indexStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => <div>Overview page</div>,
+  })
   const overviewStub = createRoute({
     getParentRoute: () => rootRoute,
     path: "/projects/$projectId/workflows/$workflowId",
@@ -40,7 +45,7 @@ async function renderWithRouter(
     path: "/projects/$projectId/workflows/$workflowId/edit",
     component: () => <div>Edit workflow page</div>,
   })
-  const routeTree = rootRoute.addChildren([overviewStub, editStub])
+  const routeTree = rootRoute.addChildren([indexStub, overviewStub, editStub])
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({
@@ -154,7 +159,7 @@ describe("WorkflowHeader", () => {
       isFetching: true,
     })
 
-    expect(screen.getByRole("button", { name: "" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "More actions" })).toBeDisabled()
   })
 
   it("does not disable the more-actions trigger when isFetching is false", async () => {
@@ -166,7 +171,7 @@ describe("WorkflowHeader", () => {
       isFetching: false,
     })
 
-    expect(screen.getByRole("button", { name: "" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "More actions" })).toBeEnabled()
   })
 
   it("shows a name/status skeleton, but still renders the action buttons, when data is not yet available", async () => {
@@ -309,5 +314,169 @@ describe("WorkflowHeader", () => {
         description: "Please try again.",
       })
     )
+  })
+
+  describe("delete workflow", () => {
+    it("opens a confirmation dialog with a disabled, counting-down confirm button", async () => {
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /^more actions$/i }))
+      await user.click(
+        screen.getByRole("menuitem", { name: /delete workflow/i })
+      )
+
+      const dialog = screen.getByRole("alertdialog")
+      expect(
+        within(dialog).getByText("Delete this workflow?")
+      ).toBeInTheDocument()
+      expect(
+        within(dialog).getByText(/permanently delete this workflow/i)
+      ).toBeInTheDocument()
+
+      const confirmButton = within(dialog).getByRole("button", {
+        name: /delete workflow \(5\)/i,
+      })
+      expect(confirmButton).toBeDisabled()
+
+      await waitFor(
+        () =>
+          expect(
+            within(dialog).getByRole("button", {
+              name: /^delete workflow$/i,
+            })
+          ).toBeEnabled(),
+        { timeout: 7000 }
+      )
+    }, 10000)
+
+    it("sends DELETE and navigates to / once the countdown finishes and confirm is clicked", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response(null, { status: 204 }))
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /^more actions$/i }))
+      await user.click(
+        screen.getByRole("menuitem", { name: /delete workflow/i })
+      )
+      const dialog = screen.getByRole("alertdialog")
+
+      await waitFor(
+        () =>
+          expect(
+            within(dialog).getByRole("button", {
+              name: /^delete workflow$/i,
+            })
+          ).toBeEnabled(),
+        { timeout: 7000 }
+      )
+      await user.click(
+        within(dialog).getByRole("button", { name: /^delete workflow$/i })
+      )
+
+      await waitFor(() =>
+        expect(fetchSpy).toHaveBeenCalledWith(
+          "/api/projects/project-1/workflows/workflow-1",
+          expect.objectContaining({ method: "DELETE" })
+        )
+      )
+      await waitFor(() =>
+        expect(screen.getByText("Overview page")).toBeInTheDocument()
+      )
+    }, 10000)
+
+    it("cancels without sending a request, and resets the countdown when reopened", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /^more actions$/i }))
+      await user.click(
+        screen.getByRole("menuitem", { name: /delete workflow/i })
+      )
+
+      await user.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", {
+          name: "Cancel",
+        })
+      )
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+      expect(fetchSpy).not.toHaveBeenCalledWith(
+        "/api/projects/project-1/workflows/workflow-1",
+        expect.objectContaining({ method: "DELETE" })
+      )
+
+      await user.click(screen.getByRole("button", { name: /^more actions$/i }))
+      await user.click(
+        screen.getByRole("menuitem", { name: /delete workflow/i })
+      )
+      const dialog = screen.getByRole("alertdialog")
+      expect(
+        within(dialog).getByRole("button", { name: /delete workflow \(5\)/i })
+      ).toBeDisabled()
+    })
+
+    it("shows an error toast and does not navigate away when the delete request fails", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(null, { status: 500 })
+      )
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /^more actions$/i }))
+      await user.click(
+        screen.getByRole("menuitem", { name: /delete workflow/i })
+      )
+      const dialog = screen.getByRole("alertdialog")
+
+      await waitFor(
+        () =>
+          expect(
+            within(dialog).getByRole("button", {
+              name: /^delete workflow$/i,
+            })
+          ).toBeEnabled(),
+        { timeout: 7000 }
+      )
+      await user.click(
+        within(dialog).getByRole("button", { name: /^delete workflow$/i })
+      )
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith("Failed to delete workflow", {
+          description: "Please try again.",
+        })
+      )
+      // The dialog stays open on failure (Radix hides the rest of the
+      // page from the accessibility tree while it's open), and no
+      // navigation to the index route happened.
+      expect(screen.queryByText("Overview page")).not.toBeInTheDocument()
+    }, 10000)
   })
 })

@@ -1,7 +1,8 @@
+import * as React from "react"
 import { EllipsisIcon, PlayIcon, Trash2Icon } from "lucide-react"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
-import { useUpdateWorkflow } from "@/entities/workflow"
+import { useDeleteWorkflow, useUpdateWorkflow } from "@/entities/workflow"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +24,8 @@ import {
 } from "@/shared/ui"
 import { cn } from "@/shared/lib/utils"
 
+const DELETE_CONFIRMATION_SECONDS = 5
+
 export function WorkflowHeader({
   projectId,
   workflowId,
@@ -40,14 +43,26 @@ export function WorkflowHeader({
   enabled: boolean | undefined
   /**
    * True while the workflow-overview data is being (re)fetched. `Run
-   * now` and the delete dropdown item are not wired to a real mutation
-   * yet, so they stay hardcoded `disabled`; the more-actions trigger is
-   * gated on this instead.
+   * now` is not wired to a real mutation yet, so it stays hardcoded
+   * `disabled`; the more-actions trigger is gated on this instead.
    */
   isFetching?: boolean
 }) {
   const hasData = workflowName !== undefined && enabled !== undefined
   const updateWorkflow = useUpdateWorkflow()
+  const deleteWorkflow = useDeleteWorkflow()
+  const navigate = useNavigate()
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
+  const [deleteCountdown, setDeleteCountdown] = React.useState(
+    DELETE_CONFIRMATION_SECONDS
+  )
+
+  React.useEffect(() => {
+    if (!deleteDialogOpen || deleteCountdown <= 0) return
+    const timer = setTimeout(() => setDeleteCountdown((n) => n - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [deleteDialogOpen, deleteCountdown])
 
   async function handleToggleEnabled() {
     if (enabled === undefined) return
@@ -62,6 +77,18 @@ export function WorkflowHeader({
         enabled ? "Failed to disable workflow" : "Failed to enable workflow",
         { description: "Please try again." }
       )
+    }
+  }
+
+  async function handleDelete() {
+    try {
+      await deleteWorkflow.mutateAsync({ projectId, workflowId })
+      setDeleteDialogOpen(false)
+      void navigate({ to: "/" })
+    } catch {
+      toast.error("Failed to delete workflow", {
+        description: "Please try again.",
+      })
     }
   }
 
@@ -151,20 +178,53 @@ export function WorkflowHeader({
                 size="icon"
                 className="bg-card"
                 disabled={isFetching}
+                aria-label="More actions"
               >
                 <EllipsisIcon />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-max">
               <DropdownMenuItem
-                disabled
                 className="text-destructive-subtle-foreground"
+                onSelect={() => setDeleteDialogOpen(true)}
               >
                 <Trash2Icon />
                 Delete workflow
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <AlertDialog
+            open={deleteDialogOpen}
+            onOpenChange={(open) => {
+              setDeleteDialogOpen(open)
+              if (open) setDeleteCountdown(DELETE_CONFIRMATION_SECONDS)
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this workflow?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete this workflow, all of its steps,
+                  and its complete run history. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={deleteCountdown > 0 || deleteWorkflow.isPending}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void handleDelete()
+                  }}
+                >
+                  {deleteWorkflow.isPending && <Spinner />}
+                  Delete workflow
+                  {deleteCountdown > 0 ? ` (${deleteCountdown})` : ""}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </div>

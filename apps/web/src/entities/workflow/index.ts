@@ -23,6 +23,8 @@ export type {
   UpdateWorkflowInput,
   WorkflowResponse,
 } from "./model/use-update-workflow"
+export { useDeleteWorkflow } from "./model/use-delete-workflow"
+export type { DeleteWorkflowInput } from "./model/use-delete-workflow"
 export {
   summarizeStep,
   summarizeStepFields,

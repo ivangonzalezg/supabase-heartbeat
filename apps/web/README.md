@@ -145,7 +145,24 @@ canceling does nothing. `WorkflowHeader` owns the mutation itself (via
 and on success invalidates both the workspace summary and
 `["workflow-overview", ...]` so the badge and every dependent query
 (including the sidebar) reflect the new status; a failed toggle shows a
-`sonner` error toast and leaves `enabled` unchanged. Duration and relative-timestamp
+`sonner` error toast and leaves `enabled` unchanged.
+
+`Delete workflow` (the `⋯` dropdown item) is also fully wired, with
+extra friction since it's irreversible: selecting it opens a second,
+independently-controlled `AlertDialog` (`open`/`onOpenChange` state in
+`WorkflowHeader`, not nested as the dropdown item's own trigger — Radix's
+`DropdownMenu` and `AlertDialog` fight over focus/unmount timing when an
+`AlertDialogTrigger` is nested inside a `DropdownMenuItem`) stating that
+the workflow, all of its steps, and its complete run history will be
+permanently deleted. Its confirm button starts disabled with a 5-second
+countdown in its label (`"Delete workflow (5)"` → ... → `"Delete
+workflow"`), reset every time the dialog reopens, so a reflexive click
+can't trigger deletion. Confirming calls `entities/workflow`'s
+`useDeleteWorkflow` (`DELETE /api/projects/:projectId/workflows/:workflowId`
+— already cascade-deletes steps, runs, and step-runs at the DB level, no
+backend changes were needed here) and, on success, navigates to `/` since
+the workflow being viewed no longer exists; a failure shows a `sonner`
+error toast and leaves the dialog open. Duration and relative-timestamp
 formatting (`"3.6s"`, `"Today, 09:00 AM"`) live in
 `pages/workflow-overview/lib/format-duration.ts` and
 `format-run-timestamp.ts`, shared between the summary card and the runs
