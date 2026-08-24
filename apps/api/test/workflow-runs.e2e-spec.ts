@@ -65,7 +65,10 @@ const TEST_PASSWORD = 'correct-horse-battery-staple';
  * below — one per table operation. Defaults model a realistic
  * successful call for each of `insert`/`read`/`update`/`delete`; tests
  * override individual entries to simulate a PostgREST error or a
- * malformed response for a specific operation.
+ * malformed response for a specific operation. `insert.data` is unused
+ * by `insertMock` (the executor never selects rows back — see
+ * `insert-step.executor.ts`) but kept on the shape for type uniformity
+ * with the other three operations.
  */
 function buildDefaultTableResponses(): Record<
   'insert' | 'read' | 'update' | 'delete',
@@ -85,12 +88,15 @@ function buildDefaultTableResponses(): Record<
 /**
  * A mock client whose chained query builders accurately model the real
  * SDK surface this task's executors call:
- * `from().insert().select()`, `from().select().limit()`,
+ * `from().insert()`, `from().select().limit()`,
  * `from().update().eq().select()`, `from().delete().eq().select()`,
  * `functions.invoke()`, `auth.signInWithPassword()`, `auth.signOut()`.
- * Every leaf method is a `jest.fn()` so tests can assert exact call
- * counts/arguments and confirm the same client instance is reused
- * across every executor in one run.
+ * `insert` never chains `.select()` (see `insert-step.executor.ts` for
+ * why) so `insertMock` resolves directly to `{ error }` and never
+ * returns row data, unlike `update`/`delete`. Every leaf method is a
+ * `jest.fn()` so tests can assert exact call counts/arguments and
+ * confirm the same client instance is reused across every executor in
+ * one run.
  */
 function buildMockSupabaseClient(options: {
   signinShouldSucceed: boolean;
@@ -102,8 +108,9 @@ function buildMockSupabaseClient(options: {
     ...options.tableResponses,
   };
 
-  const insertSelect = jest.fn(() => Promise.resolve(responses.insert));
-  const insertMock = jest.fn(() => ({ select: insertSelect }));
+  const insertMock = jest.fn(() =>
+    Promise.resolve({ error: responses.insert.error }),
+  );
 
   const readLimit = jest.fn(() => Promise.resolve(responses.read));
   const readSelect = jest.fn(() => ({
@@ -154,7 +161,6 @@ function buildMockSupabaseClient(options: {
     __mocks: {
       from,
       insertMock,
-      insertSelect,
       readSelect,
       readLimit,
       updateMock,
@@ -976,10 +982,7 @@ describe('Workflow Runs API (e2e)', () => {
         .expect(201);
 
       const body = response.body as WorkflowRunResponseBody;
-      expect(body.stepRuns[0].output).toEqual({
-        rows: [{ id: 'inserted-row-id', name: 'Heartbeat' }],
-        count: 1,
-      });
+      expect(body.stepRuns[0].output).toEqual({ rows: [], count: 0 });
     });
 
     it('succeeds with an empty read result', async () => {
@@ -1144,10 +1147,7 @@ describe('Workflow Runs API (e2e)', () => {
         .expect(200);
       const steps = stepResponse.body as { id: string }[];
 
-      expect(body.stepRuns[0].output).toEqual({
-        rows: [{ id: 'inserted-row-id', name: 'Heartbeat' }],
-        count: 1,
-      });
+      expect(body.stepRuns[0].output).toEqual({ rows: [], count: 0 });
       expect(steps).toHaveLength(1);
     });
 
@@ -1440,7 +1440,12 @@ describe('Workflow Runs API (e2e)', () => {
   });
 
   describe('output references', () => {
-    function signinInsertDeleteSignoutWorkflow() {
+    // Uses `read` (not `insert`) as the row-producing step: `insert`
+    // never selects rows back (see `insert-step.executor.ts`), so it has
+    // no output a later step could ever reference. `read` still chains
+    // `.select()` and is the simplest step type with a referenceable
+    // `rows` output.
+    function signinReadDeleteSignoutWorkflow() {
       return {
         name: 'Cleanup flow',
         cronExpression: '0 * * * *',
@@ -1452,12 +1457,9 @@ describe('Workflow Runs API (e2e)', () => {
             configuration: { email: 'a@example.com', password: TEST_PASSWORD },
           },
           {
-            stepKey: 'create_record',
-            type: 'insert',
-            configuration: {
-              table: 'heartbeat_records',
-              values: { name: 'Heartbeat' },
-            },
+            stepKey: 'find_record',
+            type: 'read',
+            configuration: { table: 'heartbeat_records', columns: '*' },
           },
           {
             stepKey: 'delete_record',
@@ -1467,7 +1469,7 @@ describe('Workflow Runs API (e2e)', () => {
               filter: {
                 column: 'id',
                 operator: 'eq',
-                value: '${steps.create_record.output.rows.0.id}',
+                value: '${steps.find_record.output.rows.0.id}',
               },
             },
           },
@@ -1476,7 +1478,38 @@ describe('Workflow Runs API (e2e)', () => {
       };
     }
 
-    it('creates a workflow with signin/insert/delete-referencing/signout, manual execution returns 201 and succeeds', async () => {
+    it('creates a workflow with signin/read/delete-referencing/signout, manual execution returns 201 and succeeds', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: {
+          read: {
+            data: [{ id: 'found-row-id', name: 'Heartbeat' }],
+            error: null,
+          },
+        },
+      });
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
       const admin = await createAndSignIn(
         app,
         `admin-${crypto.randomUUID()}@example.com`,
@@ -1487,7 +1520,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       const response = await request(app.getHttpServer())
@@ -1500,7 +1533,38 @@ describe('Workflow Runs API (e2e)', () => {
       expect(body.stepRuns).toHaveLength(4);
     });
 
-    it('delete receives the resolved ID from the earlier insert', async () => {
+    it('delete receives the resolved ID from the earlier read', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: {
+          read: {
+            data: [{ id: 'found-row-id', name: 'Heartbeat' }],
+            error: null,
+          },
+        },
+      });
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
       const admin = await createAndSignIn(
         app,
         `admin-${crypto.randomUUID()}@example.com`,
@@ -1511,7 +1575,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       await request(app.getHttpServer())
@@ -1521,11 +1585,42 @@ describe('Workflow Runs API (e2e)', () => {
 
       expect(mockClient.__mocks.deleteEq).toHaveBeenCalledWith(
         'id',
-        'inserted-row-id',
+        'found-row-id',
       );
     });
 
     it('the resolved step-run snapshot contains the resolved ID, not the reference string', async () => {
+      mockClient = buildMockSupabaseClient({
+        signinShouldSucceed: true,
+        tableResponses: {
+          read: {
+            data: [{ id: 'found-row-id', name: 'Heartbeat' }],
+            error: null,
+          },
+        },
+      });
+      const moduleFixture: TestingModule = await Test.createTestingModule({
+        imports: [AppModule],
+      })
+        .overrideProvider(SupabaseClientFactory)
+        .useValue({ create: () => mockClient })
+        .compile();
+      await app.close();
+      app = moduleFixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+        }),
+      );
+      await setupSwagger(app);
+      await app.init();
+      migrate(app.get(DatabaseService).db, {
+        migrationsFolder: join(process.cwd(), 'drizzle'),
+      });
+
       const admin = await createAndSignIn(
         app,
         `admin-${crypto.randomUUID()}@example.com`,
@@ -1536,7 +1631,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       const response = await request(app.getHttpServer())
@@ -1549,7 +1644,7 @@ describe('Workflow Runs API (e2e)', () => {
       const snapshot = deleteStepRun.inputSnapshot as {
         configuration: { filter: { value: string } };
       };
-      expect(snapshot.configuration.filter.value).toBe('inserted-row-id');
+      expect(snapshot.configuration.filter.value).toBe('found-row-id');
     });
 
     it('the persisted workflow-step configuration still contains the reference string', async () => {
@@ -1563,7 +1658,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       await request(app.getHttpServer())
@@ -1581,14 +1676,14 @@ describe('Workflow Runs API (e2e)', () => {
       }[];
       const deleteStep = steps.find((s) => s.stepKey === 'delete_record')!;
       expect(deleteStep.configuration.filter?.value).toBe(
-        '${steps.create_record.output.rows.0.id}',
+        '${steps.find_record.output.rows.0.id}',
       );
     });
 
     it('returns a failed run when the runtime row path is missing', async () => {
       mockClient = buildMockSupabaseClient({
         signinShouldSucceed: true,
-        tableResponses: { insert: { data: [], error: null } },
+        tableResponses: { read: { data: [], error: null } },
       });
       const moduleFixture: TestingModule = await Test.createTestingModule({
         imports: [AppModule],
@@ -1622,7 +1717,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       const response = await request(app.getHttpServer())
@@ -1638,7 +1733,7 @@ describe('Workflow Runs API (e2e)', () => {
     it('does not execute later steps after a missing runtime path failure', async () => {
       mockClient = buildMockSupabaseClient({
         signinShouldSucceed: true,
-        tableResponses: { insert: { data: [], error: null } },
+        tableResponses: { read: { data: [], error: null } },
       });
       const moduleFixture: TestingModule = await Test.createTestingModule({
         imports: [AppModule],
@@ -1672,7 +1767,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       const response = await request(app.getHttpServer())
@@ -1681,7 +1776,7 @@ describe('Workflow Runs API (e2e)', () => {
         .expect(201);
 
       const body = response.body as WorkflowRunResponseBody;
-      // signin, insert, and the failed delete — signout never attempted.
+      // signin, read, and the failed delete — signout never attempted.
       expect(body.stepRuns).toHaveLength(3);
       expect(mockClient.auth.signOut).not.toHaveBeenCalled();
     });
@@ -1974,7 +2069,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       await request(app.getHttpServer())
@@ -1999,7 +2094,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       await request(app.getHttpServer())
@@ -2019,7 +2114,7 @@ describe('Workflow Runs API (e2e)', () => {
         app,
         admin,
         projectId,
-        signinInsertDeleteSignoutWorkflow(),
+        signinReadDeleteSignoutWorkflow(),
       );
 
       const response = await request(app.getHttpServer())

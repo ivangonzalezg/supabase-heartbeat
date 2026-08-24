@@ -16,5 +16,6 @@ import { WorkflowRunsService } from './runs/workflow-runs.service';
     WorkflowRunsController,
   ],
   providers: [WorkflowsService, WorkflowStepsService, WorkflowRunsService],
+  exports: [WorkflowRunsService],
 })
 export class WorkflowsModule {}

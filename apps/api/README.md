@@ -924,19 +924,39 @@ step's `${steps.<step_key>.output.<path>}` reference resolves against
 * `insert`, `read`, `update`, `delete` → `{ rows: JsonObject[], count:
   number }`. `count` is always `rows.length`, never a separately
   reported count. Zero returned/affected rows is a **valid, successful**
-  result (`{ rows: [], count: 0 }`), never a technical failure.
+  result (`{ rows: [], count: 0 }`), never a technical failure. `insert`
+  always reports `{ rows: [], count: 0 }` — see below for why.
+
 * `invoke_function` → `{ data: JsonValue }`. A function that returns no
   body is valid, successful `{ data: null }` — never coerced to `{}`.
 
-**Table selection behavior**: `insert`/`update`/`delete` always call
-`.select()` after the mutation so the response contains the
-affected row(s) — the shared validation schemas for these three types
-have no `select`/`returning` configuration field of their own to honor
-instead. `read` calls `.select(configuration.columns ?? '*')`, where
-`columns` is already the PostgREST-ready comma-separated string the
-shared schema produces — no array-to-string translation happens here.
-`read.limit` is applied via `.limit()` only when present; no default
-limit is invented when it is absent.
+**Table selection behavior**: `update`/`delete` always call `.select()`
+after the mutation so the response contains the affected row(s) — the
+shared validation schemas for these two types have no `select`/
+`returning` configuration field of their own to honor instead. `read`
+calls `.select(configuration.columns ?? '*')`, where `columns` is
+already the PostgREST-ready comma-separated string the shared schema
+produces — no array-to-string translation happens here. `read.limit` is
+applied via `.limit()` only when present; no default limit is invented
+when it is absent.
+
+**`insert` deliberately never calls `.select()`.** Chaining `.select()`
+after `.insert()` makes `supabase-js` send `Prefer:
+return=representation`, which requires PostgREST to also evaluate the
+table's `SELECT` RLS policy in order to build the response — a table
+that only grants `INSERT` to a role (a common, deliberate "write-only"
+shape, e.g. a public waitlist form accepting anonymous submissions) then
+has every insert rejected with a `42501` RLS error, even though the
+insert itself was allowed by its own policy. `InsertStepExecutor` calls
+a bare `.insert(configuration.values)` and only checks `.error` — it
+never asks PostgREST to return the inserted row(s), so it only ever
+requires `INSERT` privileges. The trade-off: the inserted row (including
+any DB-generated value, such as a serial `id`) is never returned, so
+`insert.output` is always `{ rows: [], count: 0 }` and no later step can
+reference `${steps.<key>.output...}` for an `insert` step. A workflow
+that needs to reference a just-created row's data should follow the
+`insert` with a `read` step (which does call `.select()`, and therefore
+does require a `SELECT` policy) instead.
 
 **Filter translation (`update`/`delete`)**: the shared validation
 package's `updateFilterOperators` closed set currently contains exactly
@@ -1070,9 +1090,10 @@ attempted and never get a `step_run` row. There is no continue-on-error
 mode and no retry.
 
 **`workflow_runs` lifecycle**: a row is inserted with `status:
-'running'`, `triggerType: 'manual'`, and `startedAt` set, inside the
-same transaction that verifies ownership and loads the project,
-workflow, and ordered steps. After the step loop finishes (successfully
+'running'`, `triggerType` (`'manual'` for this endpoint), and
+`startedAt` set, inside the same transaction that verifies ownership and
+loads the project, workflow, and ordered steps. After the step loop
+finishes (successfully
 or on first failure), the run is updated to a final `status` of
 `'success'` or `'failed'`, with `finishedAt` set and, on failure, a
 safe, human-readable `error` summary (see "Error serialization"
@@ -1091,6 +1112,19 @@ at all — the absence of a row, not a `'skipped'` status, is how
 "never attempted" is represented for steps *after* a failure (disabled
 steps use the same "no row" representation, for a different reason —
 see above).
+
+**Internal structure.** `WorkflowRunsService` splits this orchestration
+into two trigger-agnostic private methods: `prepareRun` (resolves the
+project/workflow/ordered-steps hierarchy — optionally proving actor
+ownership — and inserts the initial `workflow_runs` row for a given
+`triggerType`) and `runSteps` (runs the enabled steps, persists
+`step_runs` rows, and finalizes the run). `executeManual` is a thin
+wrapper that adds the admin-role check and calls both with
+`triggerType: 'manual'`. This split exists so that a future
+scheduled-trigger entry point (not implemented — see "Workflow
+execution foundation" above) can call `prepareRun`/`runSteps` directly
+with `actor: null` and `triggerType: 'scheduled'`, reusing the exact
+same orchestration instead of duplicating it in a separate module.
 
 **Transaction boundaries.** Only the run-creation phase — ownership
 verification, loading the project/workflow/ordered steps, and inserting

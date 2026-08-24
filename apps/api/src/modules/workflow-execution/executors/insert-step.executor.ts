@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { WorkflowStepExecutor } from '../decorators/workflow-step-executor.decorator';
-import { buildTableStepOutput } from '../execution-output/build-step-output';
 import { buildTableOperationFailure } from './table-operation.errors';
 import type {
   ExecutableWorkflowStep,
@@ -16,19 +15,22 @@ import type {
  * as it would be for the session established by an earlier `signin`
  * step (or the anonymous role, if none ran).
  *
- * Always calls `.select()` after `.insert()` so the response contains
- * the inserted row(s), per this task's table-selection decision — the
- * shared `insertConfigurationSchema` has no `select`/`returning` option
- * of its own to honor instead.
+ * Deliberately does *not* call `.select()` after `.insert()`: doing so
+ * makes `supabase-js` send `Prefer: return=representation`, which
+ * requires PostgREST to also evaluate the table's `SELECT` RLS policy
+ * to build the response — a table that only grants `INSERT` to a role
+ * (a common, deliberate "write-only" shape, e.g. a public waitlist form)
+ * then has every insert rejected with a `42501` RLS error, even though
+ * the insert itself was allowed. Never calling `.select()` means this
+ * executor only ever requires `INSERT` privileges, matching the
+ * `insert`-only intent of this step type. The trade-off: the inserted
+ * row (including any DB-generated value, such as a serial `id`) is
+ * never returned, so `output` is always `{ rows: [], count: 0 }` and a
+ * later step cannot reference `${steps.<key>.output...}` for this step.
  *
- * PostgREST's own contract (and the installed SDK's typings) return
- * `data` as an array on success; a `null` `data` with no SDK-reported
- * `error` is not a documented success shape for an authenticated
- * `.insert().select()` call and is treated as a malformed response
- * rather than silently normalized to an empty array, so a genuine SDK
- * contract violation is never mistaken for "zero rows inserted" (an
- * insert without a violated constraint always returns the row it just
- * created).
+ * A bare `.insert()` (no `.select()`) still reports `error` on an
+ * SDK-reported failure and still throws on a network/transport
+ * exception — both handled identically to before.
  */
 @WorkflowStepExecutor('insert')
 @Injectable()
@@ -46,15 +48,12 @@ export class InsertStepExecutor implements StepExecutor<'insert'> {
     };
 
     let response: Awaited<
-      ReturnType<
-        ReturnType<ReturnType<typeof context.supabase.from>['insert']>['select']
-      >
+      ReturnType<ReturnType<typeof context.supabase.from>['insert']>
     >;
     try {
       response = await context.supabase
         .from(step.configuration.table)
-        .insert(step.configuration.values)
-        .select();
+        .insert(step.configuration.values);
     } catch (cause) {
       throw buildTableOperationFailure(identity, cause);
     }
@@ -62,10 +61,7 @@ export class InsertStepExecutor implements StepExecutor<'insert'> {
     if (response.error) {
       throw buildTableOperationFailure(identity, response.error);
     }
-    if (!Array.isArray(response.data)) {
-      throw buildTableOperationFailure(identity);
-    }
 
-    return { output: buildTableStepOutput(identity, response.data) };
+    return { output: { rows: [], count: 0 } };
   }
 }

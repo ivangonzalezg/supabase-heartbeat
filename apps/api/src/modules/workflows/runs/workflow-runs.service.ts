@@ -46,20 +46,35 @@ import type {
   WorkflowRunListItem,
   WorkflowRunSummaryMetrics,
 } from './workflow-runs.types';
+import type { WorkflowRunTriggerType } from '@supabase-heartbeat/validation';
 
 const RECENT_RUNS_LIMIT = 10;
 
 /**
- * Orchestrates one manual workflow execution end to end (`executeManual`):
- * verifies ownership, creates the `workflow_runs` row, builds one
- * isolated execution context, runs every enabled step in ascending
- * position order through `StepExecutorRegistry`, persists a `step_runs`
- * row per attempted step, stops on the first failure, and finalizes the
- * `workflow_runs` row. Also serves read-only operational-summary
- * metrics and the bounded recent-runs list (`getSummaryMetrics`), used
- * by `WorkflowsService.findOverview` to assemble the combined
- * workflow-overview response — no ownership check of its own, since
- * that caller already proves ownership before calling in.
+ * Orchestrates workflow execution end to end. The core is split into two
+ * trigger-agnostic pieces so a future scheduled-trigger entry point can
+ * reuse both without duplicating orchestration logic:
+ *
+ * - `prepareRun` resolves the project/workflow/ordered-steps hierarchy
+ *   (optionally proving actor ownership) and inserts the initial
+ *   `workflow_runs` row for a given `triggerType`.
+ * - `runSteps` runs every enabled step in ascending position order
+ *   through `StepExecutorRegistry`, persists a `step_runs` row per
+ *   attempted step, stops on the first failure, and finalizes the
+ *   `workflow_runs` row.
+ *
+ * `executeManual` is the only current caller: a thin wrapper that adds
+ * the actor/role check and passes `triggerType: 'manual'`. No scheduler
+ * exists yet — this split exists purely so that when one is added, it
+ * can call `prepareRun`/`runSteps` directly (with `actor: null` and
+ * `triggerType: 'scheduled'`) instead of reimplementing this orchestration
+ * in a separate module.
+ *
+ * Also serves read-only operational-summary metrics and the bounded
+ * recent-runs list (`getSummaryMetrics`), used by
+ * `WorkflowsService.findOverview` to assemble the combined
+ * workflow-overview response — no ownership check of its own, since that
+ * caller already proves ownership before calling in.
  *
  * Deliberately separate from `WorkflowsService`/`WorkflowStepsService`
  * (which own CRUD, not execution) — this is the only service in the
@@ -98,7 +113,7 @@ export class WorkflowRunsService {
     this.assertCanExecute(actor);
 
     const { project, workflow, orderedSteps, workflowRunId, startedAt } =
-      this.createRun(actor, projectId, workflowId);
+      this.prepareRun(projectId, workflowId, actor, 'manual');
 
     const context = this.contextFactory.create({
       projectId: project.id,
@@ -109,14 +124,31 @@ export class WorkflowRunsService {
 
     const enabledSteps = orderedSteps.filter((step) => step.enabled);
 
-    // Run-local output store: scoped to exactly this `executeManual`
-    // call (a plain local variable, not a class field), so two
-    // concurrent runs — on this same singleton service instance — never
-    // share state, and nothing here is ever persisted as a separate
-    // database field or reused across runs. Populated only after a
-    // step's success has already been persisted (see the loop below),
-    // so a later step can never observe an output whose step run was
-    // not actually committed as successful.
+    return this.runSteps(context, workflowRunId, startedAt, enabledSteps);
+  }
+
+  /**
+   * Runs every enabled step of an already-prepared run in ascending
+   * position order through `StepExecutorRegistry`, persists a
+   * `step_runs` row per attempted step, stops on the first failure, and
+   * finalizes the `workflow_runs` row. Fully trigger-agnostic — takes no
+   * actor and no `triggerType`, since both were already resolved by
+   * `prepareRun` before this is called.
+   */
+  private async runSteps(
+    context: WorkflowExecutionContext,
+    workflowRunId: string,
+    startedAt: Date,
+    enabledSteps: WorkflowStep[],
+  ): Promise<WorkflowRunDetailResponse> {
+    // Run-local output store: scoped to exactly this call (a plain local
+    // variable, not a class field), so two concurrent runs — on this
+    // same singleton service instance — never share state, and nothing
+    // here is ever persisted as a separate database field or reused
+    // across runs. Populated only after a step's success has already
+    // been persisted (see the loop below), so a later step can never
+    // observe an output whose step run was not actually committed as
+    // successful.
     const outputs = new Map<string, JsonValue>();
 
     const stepRunResponses: StepRunResponse[] = [];
@@ -206,20 +238,27 @@ export class WorkflowRunsService {
   }
 
   /**
-   * The one transaction in this service: proves ownership and hierarchy,
-   * loads the project (for its Supabase URL/key), the workflow, and its
-   * steps ordered by position, and inserts the initial `workflow_runs`
-   * row — all synchronous Drizzle calls, committed together before any
-   * executor is ever invoked. If the workflow/project cannot be found or
-   * accessed, throws the same 404 errors as every other workflow
-   * endpoint. If the insert itself fails unexpectedly, the exception
-   * propagates as-is (mapped to 500 by Nest's default filter) and no
-   * executor is called.
+   * The one transaction in this service: resolves the project/workflow/
+   * ordered-steps hierarchy and inserts the initial `workflow_runs` row
+   * for a given `triggerType` — all synchronous Drizzle calls, committed
+   * together before any executor is ever invoked.
+   *
+   * When `actor` is provided (the manual-execution path), ownership is
+   * additionally proved: the project must be owned by `actor.userId`,
+   * and the workflow must belong to that project. When `actor` is `null`
+   * (reserved for a future scheduled-trigger path, which has no HTTP
+   * actor to check), the project/workflow are resolved by id alone.
+   *
+   * If the workflow/project cannot be found or accessed, throws the same
+   * 404 errors as every other workflow endpoint. If the insert itself
+   * fails unexpectedly, the exception propagates as-is (mapped to 500 by
+   * Nest's default filter) and no executor is called.
    */
-  private createRun(
-    actor: AuthenticatedActor,
+  private prepareRun(
     projectId: string,
     workflowId: string,
+    actor: AuthenticatedActor | null,
+    triggerType: WorkflowRunTriggerType,
   ): {
     project: Project;
     workflow: Workflow;
@@ -228,22 +267,16 @@ export class WorkflowRunsService {
     startedAt: Date;
   } {
     return this.db.transaction((tx) => {
-      const [projectRow] = tx
-        .select()
-        .from(projects)
-        .where(
-          and(eq(projects.id, projectId), eq(projects.ownerId, actor.userId)),
-        )
-        .all();
+      const projectWhere = actor
+        ? and(eq(projects.id, projectId), eq(projects.ownerId, actor.userId))
+        : eq(projects.id, projectId);
+      const [projectRow] = tx.select().from(projects).where(projectWhere).all();
       if (!projectRow) {
         throw new ProjectNotFoundError();
       }
 
-      const [workflowRow] = tx
-        .select()
-        .from(workflows)
-        .where(
-          and(
+      const workflowWhere = actor
+        ? and(
             eq(workflows.id, workflowId),
             eq(workflows.projectId, projectId),
             exists(
@@ -257,8 +290,12 @@ export class WorkflowRunsService {
                   ),
                 ),
             ),
-          ),
-        )
+          )
+        : and(eq(workflows.id, workflowId), eq(workflows.projectId, projectId));
+      const [workflowRow] = tx
+        .select()
+        .from(workflows)
+        .where(workflowWhere)
         .all();
       if (!workflowRow) {
         throw new WorkflowNotFoundError();
@@ -296,7 +333,7 @@ export class WorkflowRunsService {
         .values({
           id: crypto.randomUUID(),
           workflowId,
-          triggerType: 'manual',
+          triggerType,
           status: 'running',
           startedAt,
         })

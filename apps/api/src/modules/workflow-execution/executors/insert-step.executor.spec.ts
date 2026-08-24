@@ -32,11 +32,11 @@ function buildContext(fromMock: jest.Mock): WorkflowExecutionContext {
   };
 }
 
-function buildFromMock(select: jest.Mock): {
+function buildFromMock(insertResult: unknown): {
   fromMock: jest.Mock;
   insertMock: jest.Mock;
 } {
-  const insertMock = jest.fn(() => ({ select }));
+  const insertMock = jest.fn(() => Promise.resolve(insertResult));
   const fromMock = jest.fn(() => ({ insert: insertMock }));
   return { fromMock, insertMock };
 }
@@ -53,10 +53,7 @@ describe('InsertStepExecutor', () => {
   });
 
   it('uses the context client via from()', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: [{ id: '1' }], error: null }),
-    );
-    const { fromMock } = buildFromMock(select);
+    const { fromMock } = buildFromMock({ error: null });
     const context = buildContext(fromMock);
 
     await executor.execute(context, buildStep());
@@ -65,10 +62,7 @@ describe('InsertStepExecutor', () => {
   });
 
   it('passes exact values to .insert()', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: [{ id: '1' }], error: null }),
-    );
-    const { fromMock, insertMock } = buildFromMock(select);
+    const { fromMock, insertMock } = buildFromMock({ error: null });
     const context = buildContext(fromMock);
 
     await executor.execute(context, buildStep());
@@ -76,41 +70,21 @@ describe('InsertStepExecutor', () => {
     expect(insertMock).toHaveBeenCalledWith(VALUES);
   });
 
-  it('calls .select() after .insert()', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: [{ id: '1' }], error: null }),
-    );
-    const { fromMock } = buildFromMock(select);
+  it('never calls .select() after .insert(), to avoid requiring a SELECT RLS policy', async () => {
+    // `.insert()` resolves directly to `{ error }` with no `.select`
+    // method at all — if the executor tried to chain `.select()`, this
+    // would throw "select is not a function" instead of succeeding.
+    const insertMock = jest.fn(() => Promise.resolve({ error: null }));
+    const fromMock = jest.fn(() => ({ insert: insertMock }));
     const context = buildContext(fromMock);
 
-    await executor.execute(context, buildStep());
-
-    expect(select).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns stable { rows, count } output', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({
-        data: [{ id: 'created-row-id', name: 'Heartbeat' }],
-        error: null,
-      }),
-    );
-    const { fromMock } = buildFromMock(select);
-    const context = buildContext(fromMock);
-
-    const result = await executor.execute(context, buildStep());
-
-    expect(result).toEqual({
-      output: {
-        rows: [{ id: 'created-row-id', name: 'Heartbeat' }],
-        count: 1,
-      },
+    await expect(executor.execute(context, buildStep())).resolves.toEqual({
+      output: { rows: [], count: 0 },
     });
   });
 
-  it('succeeds with an empty rows array when data is empty', async () => {
-    const select = jest.fn(() => Promise.resolve({ data: [], error: null }));
-    const { fromMock } = buildFromMock(select);
+  it('returns stable { rows: [], count: 0 } output on success', async () => {
+    const { fromMock } = buildFromMock({ error: null });
     const context = buildContext(fromMock);
 
     const result = await executor.execute(context, buildStep());
@@ -119,18 +93,14 @@ describe('InsertStepExecutor', () => {
   });
 
   it('converts an SDK-returned error into a StepExecutionError', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({
-        data: null,
-        error: {
-          message: 'permission denied',
-          details: '',
-          hint: '',
-          code: '42501',
-        },
-      }),
-    );
-    const { fromMock } = buildFromMock(select);
+    const { fromMock } = buildFromMock({
+      error: {
+        message: 'permission denied',
+        details: '',
+        hint: '',
+        code: '42501',
+      },
+    });
     const context = buildContext(fromMock);
 
     await expect(executor.execute(context, buildStep())).rejects.toThrow(
@@ -139,42 +109,19 @@ describe('InsertStepExecutor', () => {
   });
 
   it('converts a thrown SDK exception into a StepExecutionError', async () => {
-    const select = jest.fn(() => Promise.reject(new Error('network failure')));
-    const { fromMock } = buildFromMock(select);
+    const insertMock = jest.fn(() =>
+      Promise.reject(new Error('network failure')),
+    );
+    const fromMock = jest.fn(() => ({ insert: insertMock }));
     const context = buildContext(fromMock);
 
     await expect(executor.execute(context, buildStep())).rejects.toThrow(
       StepExecutionError,
     );
-  });
-
-  it('fails safely for malformed (non-array, non-null) table data', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: 'not-an-array', error: null }),
-    );
-    const { fromMock } = buildFromMock(select);
-    const context = buildContext(fromMock);
-
-    await expect(executor.execute(context, buildStep())).rejects.toThrow(
-      StepExecutionError,
-    );
-  });
-
-  it('fails safely for a non-JSON-safe row', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: [{ createdAt: new Date() }], error: null }),
-    );
-    const { fromMock } = buildFromMock(select);
-    const context = buildContext(fromMock);
-
-    await expect(executor.execute(context, buildStep())).rejects.toThrow();
   });
 
   it('never includes a token or the client object in the result', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: [{ id: '1' }], error: null }),
-    );
-    const { fromMock } = buildFromMock(select);
+    const { fromMock } = buildFromMock({ error: null });
     const context = buildContext(fromMock);
 
     const result = await executor.execute(context, buildStep());
@@ -185,19 +132,14 @@ describe('InsertStepExecutor', () => {
   });
 
   it('never includes row/error content in a thrown error message', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({
-        data: null,
-        error: {
-          message: 'row violates check constraint "secret-constraint-name"',
-          details:
-            'Key (email)=(super-secret-value@example.com) already exists.',
-          hint: '',
-          code: '23505',
-        },
-      }),
-    );
-    const { fromMock } = buildFromMock(select);
+    const { fromMock } = buildFromMock({
+      error: {
+        message: 'row violates check constraint "secret-constraint-name"',
+        details: 'Key (email)=(super-secret-value@example.com) already exists.',
+        hint: '',
+        code: '23505',
+      },
+    });
     const context = buildContext(fromMock);
 
     try {
@@ -212,10 +154,7 @@ describe('InsertStepExecutor', () => {
   });
 
   it('does not create a new Supabase client', async () => {
-    const select = jest.fn(() =>
-      Promise.resolve({ data: [{ id: '1' }], error: null }),
-    );
-    const { fromMock } = buildFromMock(select);
+    const { fromMock } = buildFromMock({ error: null });
     const context = buildContext(fromMock);
     const originalSupabase = context.supabase;
 

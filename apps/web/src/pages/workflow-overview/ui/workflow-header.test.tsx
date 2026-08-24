@@ -16,6 +16,7 @@ import { WorkflowHeader } from "./workflow-header"
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
+    success: vi.fn(),
   },
 }))
 
@@ -71,6 +72,7 @@ describe("WorkflowHeader", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.mocked(toast.error).mockReset()
+    vi.mocked(toast.success).mockReset()
   })
 
   it("renders the workflow name", async () => {
@@ -314,6 +316,174 @@ describe("WorkflowHeader", () => {
         description: "Please try again.",
       })
     )
+  })
+
+  describe("run now", () => {
+    it("POSTs /api/projects/:projectId/workflows/:workflowId/runs when clicked", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse(
+          {
+            id: "run-1",
+            workflowId: "workflow-1",
+            triggerType: "manual",
+            status: "success",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            finishedAt: "2026-01-01T00:00:01.000Z",
+            error: null,
+            stepRuns: [],
+          },
+          201
+        )
+      )
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /run now/i }))
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          "/api/projects/project-1/workflows/workflow-1/runs",
+          expect.objectContaining({ method: "POST" })
+        )
+      })
+    })
+
+    it("shows a success toast when the run completes successfully", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse(
+          {
+            id: "run-1",
+            workflowId: "workflow-1",
+            triggerType: "manual",
+            status: "success",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            finishedAt: "2026-01-01T00:00:01.000Z",
+            error: null,
+            stepRuns: [],
+          },
+          201
+        )
+      )
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /run now/i }))
+
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Workflow run completed")
+      )
+    })
+
+    it("shows an error toast using the run's error when the run fails", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse(
+          {
+            id: "run-1",
+            workflowId: "workflow-1",
+            triggerType: "manual",
+            status: "failed",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            finishedAt: "2026-01-01T00:00:01.000Z",
+            error: "Step 'signin' failed",
+            stepRuns: [],
+          },
+          201
+        )
+      )
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /run now/i }))
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith("Workflow run failed", {
+          description: "Step 'signin' failed",
+        })
+      )
+    })
+
+    it("shows a generic error toast when the request itself fails", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(null, { status: 500 })
+      )
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      await user.click(screen.getByRole("button", { name: /run now/i }))
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "Failed to start workflow run",
+          {
+            description: "Please try again.",
+          }
+        )
+      )
+    })
+
+    it("shows a spinner and disables the button while the run is pending", async () => {
+      let resolveFetch: (value: Response) => void = () => {}
+      vi.spyOn(globalThis, "fetch").mockReturnValue(
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve
+        })
+      )
+      const user = userEvent.setup()
+
+      await renderWithRouter({
+        projectId: "project-1",
+        workflowId: "workflow-1",
+        workflowName: "Daily activity",
+        enabled: true,
+      })
+
+      const runButton = screen.getByRole("button", { name: /run now/i })
+      await user.click(runButton)
+
+      await waitFor(() => expect(runButton).toBeDisabled())
+
+      resolveFetch(
+        jsonResponse(
+          {
+            id: "run-1",
+            workflowId: "workflow-1",
+            triggerType: "manual",
+            status: "success",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            finishedAt: "2026-01-01T00:00:01.000Z",
+            error: null,
+            stepRuns: [],
+          },
+          201
+        )
+      )
+
+      await waitFor(() => expect(runButton).toBeEnabled())
+    })
   })
 
   describe("delete workflow", () => {

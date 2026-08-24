@@ -2,7 +2,11 @@ import * as React from "react"
 import { EllipsisIcon, PlayIcon, Trash2Icon } from "lucide-react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
-import { useDeleteWorkflow, useUpdateWorkflow } from "@/entities/workflow"
+import {
+  useDeleteWorkflow,
+  useRunWorkflow,
+  useUpdateWorkflow,
+} from "@/entities/workflow"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,15 +46,15 @@ export function WorkflowHeader({
   workflowName: string | undefined
   enabled: boolean | undefined
   /**
-   * True while the workflow-overview data is being (re)fetched. `Run
-   * now` is not wired to a real mutation yet, so it stays hardcoded
-   * `disabled`; the more-actions trigger is gated on this instead.
+   * True while the workflow-overview data is being (re)fetched. Gates
+   * the more-actions trigger.
    */
   isFetching?: boolean
 }) {
   const hasData = workflowName !== undefined && enabled !== undefined
   const updateWorkflow = useUpdateWorkflow()
   const deleteWorkflow = useDeleteWorkflow()
+  const runWorkflow = useRunWorkflow()
   const navigate = useNavigate()
 
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
@@ -77,6 +81,24 @@ export function WorkflowHeader({
         enabled ? "Failed to disable workflow" : "Failed to enable workflow",
         { description: "Please try again." }
       )
+    }
+  }
+
+  async function handleRunNow() {
+    try {
+      const result = await runWorkflow.mutateAsync({ projectId, workflowId })
+      if (result.status === "success") {
+        toast.success("Workflow run completed")
+      } else {
+        toast.error("Workflow run failed", {
+          description:
+            result.error ?? "Check the recent runs list for details.",
+        })
+      }
+    } catch {
+      toast.error("Failed to start workflow run", {
+        description: "Please try again.",
+      })
     }
   }
 
@@ -127,8 +149,12 @@ export function WorkflowHeader({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" disabled>
-            <PlayIcon />
+          <Button
+            type="button"
+            disabled={!hasData || runWorkflow.isPending}
+            onClick={() => void handleRunNow()}
+          >
+            {runWorkflow.isPending ? <Spinner /> : <PlayIcon />}
             Run now
           </Button>
           <Button variant="outline" className="bg-card" asChild>
