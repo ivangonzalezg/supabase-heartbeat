@@ -1,10 +1,18 @@
-import { Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiInternalServerErrorResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -13,9 +21,15 @@ import {
 import { Roles, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { toAuthenticatedActor } from '../../../lib/authorization/current-actor';
-import { WorkflowRunResponseDto } from './dto/workflow-run-response.dto';
+import {
+  WorkflowRunDetailWithStepsResponseDto,
+  WorkflowRunResponseDto,
+} from './dto/workflow-run-response.dto';
 import { WorkflowRunsService } from './workflow-runs.service';
-import type { WorkflowRunDetailResponse } from './workflow-runs.types';
+import type {
+  WorkflowRunDetailResponse,
+  WorkflowRunDetailWithStepsResponse,
+} from './workflow-runs.types';
 
 @ApiTags('Workflow Runs')
 @ApiCookieAuth('better-auth.session_token')
@@ -82,6 +96,46 @@ export class WorkflowRunsController {
       toAuthenticatedActor(session),
       projectId,
       workflowId,
+    );
+  }
+
+  @Get(':runId')
+  @ApiParam({ name: 'runId', description: 'The workflow run to read.' })
+  @ApiOperation({
+    summary: "Read one workflow run's full detail, including its steps",
+    description:
+      'Both admin and viewer may read a run in their own project. ' +
+      "Returns the run's metadata plus every attempted step run, in " +
+      "execution order, each enriched with its step's `stepKey`/`type` " +
+      'so a run-details UI can render step titles without a second ' +
+      'request. Only steps that were actually attempted appear here — ' +
+      'if execution stopped early due to a failure, steps after the ' +
+      'failed one are absent (they were never attempted, and no ' +
+      '"skipped" row is persisted for them). A run that does not exist, ' +
+      'belongs to a different workflow, or whose workflow/project is not ' +
+      'accessible to the current actor is reported as 404, identically ' +
+      'in every case.',
+  })
+  @ApiOkResponse({
+    description: "The run's detail, including its ordered step runs.",
+    type: WorkflowRunDetailWithStepsResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description:
+      'The project, workflow, or run does not exist, or is not ' +
+      'accessible to the current actor.',
+  })
+  async findRunDetail(
+    @Session() session: UserSession,
+    @Param('projectId') projectId: string,
+    @Param('workflowId') workflowId: string,
+    @Param('runId') runId: string,
+  ): Promise<WorkflowRunDetailWithStepsResponse> {
+    return this.workflowRunsService.findRunDetail(
+      toAuthenticatedActor(session),
+      projectId,
+      workflowId,
+      runId,
     );
   }
 }

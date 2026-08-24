@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { RecentRunsTable } from "./recent-runs-table"
 import type { WorkflowRunListItem } from "@/entities/workflow"
 
@@ -26,7 +27,7 @@ const runs: WorkflowRunListItem[] = [
 
 describe("RecentRunsTable", () => {
   it("renders the empty state when given no runs", () => {
-    render(<RecentRunsTable runs={[]} />)
+    render(<RecentRunsTable runs={[]} onViewDetails={vi.fn()} />)
 
     expect(screen.getByText("No runs yet")).toBeInTheDocument()
     expect(
@@ -36,7 +37,7 @@ describe("RecentRunsTable", () => {
   })
 
   it("renders a table row per run when populated", () => {
-    render(<RecentRunsTable runs={runs} />)
+    render(<RecentRunsTable runs={runs} onViewDetails={vi.fn()} />)
 
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(screen.getByText("Success")).toBeInTheDocument()
@@ -59,9 +60,20 @@ describe("RecentRunsTable", () => {
             failedStepKey: null,
           },
         ]}
+        onViewDetails={vi.fn()}
       />
     )
 
     expect(screen.getAllByText("—")).toHaveLength(2)
+  })
+
+  it("calls onViewDetails with the clicked run's id", async () => {
+    const onViewDetails = vi.fn()
+    const user = userEvent.setup()
+    render(<RecentRunsTable runs={runs} onViewDetails={onViewDetails} />)
+
+    await user.click(screen.getAllByText("View details")[1])
+
+    expect(onViewDetails).toHaveBeenCalledWith("run-2")
   })
 })

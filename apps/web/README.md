@@ -100,6 +100,9 @@ corresponding functionality is built, not created speculatively.
 every dashboard-area page (see "Routing" below for how it's wired in).
 `widgets/workflow-form` also exists: the workflow create/edit form,
 shared by `pages/create-workflow` and `pages/edit-workflow` (see below).
+`widgets/run-details-drawer` exists too: the right-side run-details
+slide-over, deliberately built as a self-contained, data-props-only
+component ahead of its second real caller — see below.
 `entities/session`, `entities/project`, and `entities/workflow` exist;
 `entities/project` and `entities/workflow` both read from the same
 `/api/workspace-summary` endpoint (defined once in `shared/api`, since
@@ -164,9 +167,41 @@ backend changes were needed here) and, on success, navigates to `/` since
 the workflow being viewed no longer exists; a failure shows a `sonner`
 error toast and leaves the dialog open. Duration and relative-timestamp
 formatting (`"3.6s"`, `"Today, 09:00 AM"`) live in
-`pages/workflow-overview/lib/format-duration.ts` and
-`format-run-timestamp.ts`, shared between the summary card and the runs
-table.
+`entities/workflow/lib/format-duration.ts` and `format-run-timestamp.ts`
+(moved out of this page's own `lib/` since the run-details drawer below
+also needs them) — shared between the summary card, the runs table, and
+the drawer. The recent-runs table's per-status colored chip
+(Success/Failed/Skipped/Running/...) is `entities/workflow`'s
+`RunStatusBadge`, for the same reuse reason.
+
+Each recent-runs row's "View details" action opens
+`widgets/run-details-drawer`'s `RunDetailsDrawer` — a right-side
+slide-over (`shared/ui/sheet.tsx`'s `Sheet`, `side="right"`, previously
+unused anywhere in the app) showing one run's full detail: execution
+metadata (run ID, trigger, duration), timing (started/finished), outcome
+(status, failed step), and a "STEP EXECUTION SEQUENCE" list — one card
+per attempted step with its status, duration, and type/outcome-dependent
+detail rows (`Input`/`Output` on success, `Error` on the step that
+failed). Data comes from `entities/workflow`'s `useWorkflowRunDetail`
+(`GET .../workflows/:workflowId/runs/:runId`, a new backend endpoint —
+`WorkflowRunsService.findRunDetail`, joining `step_runs` to
+`workflow_steps` so each step run arrives already enriched with its
+`stepKey`/`type`). Because execution stops at the first failure and the
+backend never persists a `skipped` row for steps after it, the drawer
+infers "skipped" client-side: given the workflow's currently configured
+steps (passed in as `configuredSteps`, optional) and a failed run, any
+configured step beyond the last persisted step run is rendered as a
+synthetic skipped card ("Not executed after failure") — no backend
+change was needed for this. `WorkflowOverviewPage` owns which run is
+selected (`selectedRunId` state) and passes it down; the drawer itself
+takes plain data props (`projectId`/`workflowId`/`runId`/`workflowName`/
+`projectName`/`configuredSteps`) rather than reading route params, so it
+has no dependency on this specific page and can be dropped into a future
+project-level or workspace-level run-list page unmodified — the reason
+it lives in `widgets/`, not `pages/workflow-overview/ui/`, despite
+having only one caller today (an explicit `steiger.config.ts` override
+suppresses the "insignificant slice" rule for this one slice, with a
+comment explaining why).
 
 `widgets/workflow-form` holds the workflow create/edit form (metadata
 fields, drag-and-drop step list, and every per-step-type field

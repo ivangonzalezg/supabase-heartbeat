@@ -1,6 +1,6 @@
 import { CirclePlayIcon } from "lucide-react"
 import {
-  Badge,
+  Button,
   Table,
   TableBody,
   TableCell,
@@ -9,34 +9,25 @@ import {
   TableRow,
 } from "@/shared/ui"
 import { cn } from "@/shared/lib/utils"
-import type { WorkflowRunListItem } from "@/entities/workflow"
-import { formatDuration } from "../lib/format-duration"
-import { formatRunTimestamp } from "../lib/format-run-timestamp"
-
-const STATUS_LABEL: Record<WorkflowRunListItem["status"], string> = {
-  pending: "Pending",
-  running: "Running",
-  success: "Success",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  skipped: "Skipped",
-}
-
-const STATUS_CLASS: Record<WorkflowRunListItem["status"], string> = {
-  pending: "bg-secondary text-secondary-foreground",
-  running: "bg-running text-running-foreground",
-  success: "bg-success text-success-foreground",
-  failed: "bg-destructive-subtle text-destructive-subtle-foreground",
-  cancelled: "bg-secondary text-secondary-foreground",
-  skipped: "bg-skipped text-skipped-foreground",
-}
+import {
+  formatDuration,
+  formatRunTimestamp,
+  RunStatusBadge,
+  type WorkflowRunListItem,
+} from "@/entities/workflow"
 
 const TRIGGER_LABEL: Record<WorkflowRunListItem["triggerType"], string> = {
   manual: "Manual",
   scheduled: "Scheduled",
 }
 
-export function RecentRunsTable({ runs }: { runs: WorkflowRunListItem[] }) {
+export function RecentRunsTable({
+  runs,
+  onViewDetails,
+}: {
+  runs: WorkflowRunListItem[]
+  onViewDetails: (runId: string) => void
+}) {
   if (runs.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-10 text-center">
@@ -65,9 +56,7 @@ export function RecentRunsTable({ runs }: { runs: WorkflowRunListItem[] }) {
         {runs.map((run) => (
           <TableRow key={run.id}>
             <TableCell className="py-3">
-              <Badge className={cn(STATUS_CLASS[run.status])}>
-                {STATUS_LABEL[run.status]}
-              </Badge>
+              <RunStatusBadge status={run.status} />
             </TableCell>
             <TableCell className="py-3">
               {TRIGGER_LABEL[run.triggerType]}
@@ -89,7 +78,14 @@ export function RecentRunsTable({ runs }: { runs: WorkflowRunListItem[] }) {
               {run.failedStepKey ?? "—"}
             </TableCell>
             <TableCell className="py-3">
-              <span className="text-primary">View details</span>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0 text-primary"
+                onClick={() => onViewDetails(run.id)}
+              >
+                View details
+              </Button>
             </TableCell>
           </TableRow>
         ))}

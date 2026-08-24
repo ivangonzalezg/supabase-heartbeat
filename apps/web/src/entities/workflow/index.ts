@@ -13,6 +13,11 @@ export type {
   WorkflowRunSummaryMetrics,
   WorkflowRunListItem,
 } from "./model/use-workflow-overview"
+export { useWorkflowRunDetail } from "./model/use-workflow-run-detail"
+export type {
+  StepRunDetail,
+  WorkflowRunDetailWithSteps,
+} from "./model/use-workflow-run-detail"
 export { useReplaceWorkflow } from "./model/use-replace-workflow"
 export type {
   ReplaceWorkflowInput,
@@ -36,3 +41,6 @@ export {
   stringifyJsonValue,
 } from "./lib/summarize-step"
 export type { StepSummaryField } from "./lib/summarize-step"
+export { formatDuration } from "./lib/format-duration"
+export { formatRunTimestamp } from "./lib/format-run-timestamp"
+export { RunStatusBadge } from "./ui/run-status-badge"

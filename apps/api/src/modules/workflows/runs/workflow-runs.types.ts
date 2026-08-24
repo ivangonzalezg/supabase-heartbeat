@@ -2,6 +2,7 @@ import type {
   WorkflowRunStatus,
   WorkflowRunTriggerType,
   StepRunStatus,
+  WorkflowStepType,
 } from '@supabase-heartbeat/validation';
 
 /**
@@ -89,4 +90,41 @@ export interface WorkflowRunListItem {
   finishedAt: Date | null;
   durationMs: number | null;
   failedStepKey: string | null;
+}
+
+/**
+ * One step run, enriched with the identifying fields of the workflow
+ * step it belongs to (`stepKey`, `type`) — `StepRunResponse` alone only
+ * carries `workflowStepId`, which is not enough to render a step's
+ * title/type in a run-detail view without a second lookup. Used only by
+ * `GET .../runs/:runId` (see `WorkflowRunDetailWithStepsResponse`); the
+ * manual-run endpoint keeps returning plain `StepRunResponse`, since its
+ * caller already has the full step list from the request that triggered
+ * the run.
+ */
+export interface StepRunDetailResponse extends StepRunResponse {
+  stepKey: string;
+  type: WorkflowStepType;
+}
+
+/**
+ * The response shape for `GET
+ * .../workflows/:workflowId/runs/:runId` — a single run's full detail,
+ * with each step run enriched with its step's `stepKey`/`type` so a
+ * run-details UI can render step titles without a second request.
+ * `stepRuns` is ordered by `position` ascending, matching execution
+ * order, and — like `WorkflowRunDetailResponse.stepRuns` — only
+ * contains steps that were actually attempted (never a synthetic
+ * "skipped" row for steps after an early failure; see
+ * `WorkflowRunsService.runSteps`).
+ */
+export interface WorkflowRunDetailWithStepsResponse {
+  id: string;
+  workflowId: string;
+  triggerType: WorkflowRunTriggerType;
+  status: WorkflowRunStatus;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  error: string | null;
+  stepRuns: StepRunDetailResponse[];
 }

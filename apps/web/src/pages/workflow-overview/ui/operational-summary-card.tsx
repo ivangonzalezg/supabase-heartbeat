@@ -1,6 +1,8 @@
-import type { WorkflowRunSummaryMetrics } from "@/entities/workflow"
-import { formatDuration } from "../lib/format-duration"
-import { formatRunTimestamp } from "../lib/format-run-timestamp"
+import {
+  formatDuration,
+  formatRunTimestamp,
+  type WorkflowRunSummaryMetrics,
+} from "@/entities/workflow"
 
 const METRICS: {
   key: keyof WorkflowRunSummaryMetrics

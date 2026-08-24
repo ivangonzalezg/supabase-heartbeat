@@ -2511,4 +2511,124 @@ describe('WorkflowRunsService', () => {
       expect(successRun?.failedStepKey).toBeNull();
     });
   });
+
+  describe('findRunDetail', () => {
+    it('returns the run with its step runs, each enriched with stepKey/type, in position order', async () => {
+      const stepA = await createStep(db, workflowA.id, {
+        stepKey: 'sign_in',
+        type: 'signin',
+        position: 0,
+      });
+      const stepB = await createStep(db, workflowA.id, {
+        stepKey: 'wait_a_bit',
+        type: 'wait',
+        position: 1,
+      });
+      const run = await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+        triggerType: 'scheduled',
+        startedAt: new Date('2026-01-01T00:00:00.000Z'),
+        finishedAt: new Date('2026-01-01T00:00:05.000Z'),
+      });
+      await createStepRun(db, run.id, stepB.id, {
+        position: 1,
+        status: 'success',
+        output: { waitedSeconds: 5 },
+      });
+      await createStepRun(db, run.id, stepA.id, {
+        position: 0,
+        status: 'success',
+        inputSnapshot: { email: 'user@example.com' },
+      });
+
+      const result = await service.findRunDetail(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        run.id,
+      );
+
+      expect(result.id).toBe(run.id);
+      expect(result.status).toBe('success');
+      expect(result.triggerType).toBe('scheduled');
+      expect(result.stepRuns.map((s) => [s.stepKey, s.type])).toEqual([
+        ['sign_in', 'signin'],
+        ['wait_a_bit', 'wait'],
+      ]);
+      expect(result.stepRuns[0].inputSnapshot).toEqual({
+        email: 'user@example.com',
+      });
+      expect(result.stepRuns[1].output).toEqual({ waitedSeconds: 5 });
+    });
+
+    it('returns an empty stepRuns array when no steps were attempted', async () => {
+      const run = await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+      });
+
+      const result = await service.findRunDetail(
+        adminAActor,
+        projectA.id,
+        workflowA.id,
+        run.id,
+      );
+
+      expect(result.stepRuns).toEqual([]);
+    });
+
+    it('lets a viewer read a run in their own project', async () => {
+      const projectViewer = await createProject(db, viewerA.id, {
+        name: 'Project Viewer',
+      });
+      const viewerWorkflow = await createWorkflow(db, projectViewer.id, {
+        name: 'Viewer Workflow',
+      });
+      const run = await createWorkflowRun(db, viewerWorkflow.id, {
+        status: 'success',
+      });
+
+      await expect(
+        service.findRunDetail(
+          viewerAActor,
+          projectViewer.id,
+          viewerWorkflow.id,
+          run.id,
+        ),
+      ).resolves.toMatchObject({ id: run.id });
+    });
+
+    it('rejects reading a run under a project the actor does not own', async () => {
+      const run = await createWorkflowRun(db, workflowA.id, {
+        status: 'success',
+      });
+
+      await expect(
+        service.findRunDetail(adminBActor, projectA.id, workflowA.id, run.id),
+      ).rejects.toThrow(ProjectNotFoundError);
+    });
+
+    it('rejects a run id that does not exist', async () => {
+      await expect(
+        service.findRunDetail(
+          adminAActor,
+          projectA.id,
+          workflowA.id,
+          'nonexistent-run-id',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a run that belongs to a different workflow', async () => {
+      const otherWorkflow = await createWorkflow(db, projectA.id, {
+        name: 'Other Workflow',
+      });
+      const run = await createWorkflowRun(db, otherWorkflow.id, {
+        status: 'success',
+      });
+
+      await expect(
+        service.findRunDetail(adminAActor, projectA.id, workflowA.id, run.id),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
 });

@@ -1,5 +1,8 @@
+import * as React from "react"
 import { useParams } from "@tanstack/react-router"
+import { useProjects } from "@/entities/project"
 import { useWorkflowOverview, useWorkflows } from "@/entities/workflow"
+import { RunDetailsDrawer } from "@/widgets/run-details-drawer"
 import { ConfiguredStepsPanel } from "./configured-steps-panel"
 import { ConfiguredStepsPanelSkeleton } from "./configured-steps-panel-skeleton"
 import { OperationalSummaryCard } from "./operational-summary-card"
@@ -22,11 +25,15 @@ export function WorkflowOverviewPage() {
   // data source for everything else on this page (name/enabled again,
   // steps, operational-summary metrics, and recent runs).
   const workflowsQuery = useWorkflows(true)
+  const projectsQuery = useProjects(true)
   const overviewQuery = useWorkflowOverview(projectId, workflowId, true)
+
+  const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
 
   const prefilledWorkflow = workflowsQuery.data?.find(
     (workflow) => workflow.id === workflowId
   )
+  const project = projectsQuery.data?.find((p) => p.id === projectId)
 
   // Prefer the overview response's name/enabled once it lands (the
   // complete, authoritative source); fall back to the workspace-summary
@@ -81,10 +88,26 @@ export function WorkflowOverviewPage() {
               Failed to load recent runs.
             </p>
           ) : (
-            <RecentRunsTable runs={overviewQuery.data.recentRuns} />
+            <RecentRunsTable
+              runs={overviewQuery.data.recentRuns}
+              onViewDetails={setSelectedRunId}
+            />
           )}
         </div>
       </div>
+
+      <RunDetailsDrawer
+        projectId={projectId}
+        workflowId={workflowId}
+        runId={selectedRunId}
+        workflowName={workflowName ?? ""}
+        projectName={project?.name ?? ""}
+        configuredSteps={overviewQuery.data?.steps}
+        open={selectedRunId !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedRunId(null)
+        }}
+      />
     </div>
   )
 }

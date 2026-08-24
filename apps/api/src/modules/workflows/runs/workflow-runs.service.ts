@@ -41,12 +41,15 @@ import {
 import { validateWorkflowReferences } from '../references/validate-workflow-references';
 import { resolveStepReferences } from '../references/resolve-step-references';
 import type {
+  StepRunDetailResponse,
   StepRunResponse,
   WorkflowRunDetailResponse,
+  WorkflowRunDetailWithStepsResponse,
   WorkflowRunListItem,
   WorkflowRunSummaryMetrics,
 } from './workflow-runs.types';
 import type { WorkflowRunTriggerType } from '@supabase-heartbeat/validation';
+import { WorkflowRunNotFoundError } from './workflow-runs.errors';
 
 const RECENT_RUNS_LIMIT = 10;
 
@@ -550,6 +553,115 @@ export class WorkflowRunsService {
     };
   }
 
+  /**
+   * A single run's full detail, including every attempted step run
+   * enriched with its step's `stepKey`/`type` via a join — ownership-scoped
+   * through the parent project/workflow, same `EXISTS`-correlated-subquery
+   * pattern as `WorkflowsService`/`WorkflowStepsService`. A run that
+   * exists but belongs to a different workflow (or a workflow the actor
+   * doesn't own) is reported identically to a nonexistent run.
+   */
+  async findRunDetail(
+    actor: AuthenticatedActor,
+    projectId: string,
+    workflowId: string,
+    runId: string,
+  ): Promise<WorkflowRunDetailWithStepsResponse> {
+    await this.assertOwnedWorkflow(actor, projectId, workflowId);
+
+    const [runRow] = await this.db
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          eq(workflowRuns.id, runId),
+          eq(workflowRuns.workflowId, workflowId),
+        ),
+      );
+    if (!runRow) {
+      throw new WorkflowRunNotFoundError();
+    }
+
+    const stepRunRows = await this.db
+      .select({
+        id: stepRuns.id,
+        workflowRunId: stepRuns.workflowRunId,
+        workflowStepId: stepRuns.workflowStepId,
+        position: stepRuns.position,
+        status: stepRuns.status,
+        inputSnapshot: stepRuns.inputSnapshot,
+        output: stepRuns.output,
+        error: stepRuns.error,
+        startedAt: stepRuns.startedAt,
+        finishedAt: stepRuns.finishedAt,
+        stepKey: workflowSteps.stepKey,
+        type: workflowSteps.type,
+      })
+      .from(stepRuns)
+      .innerJoin(workflowSteps, eq(stepRuns.workflowStepId, workflowSteps.id))
+      .where(eq(stepRuns.workflowRunId, runId))
+      .orderBy(asc(stepRuns.position));
+
+    return {
+      id: runRow.id,
+      workflowId: runRow.workflowId,
+      triggerType: runRow.triggerType,
+      status: runRow.status,
+      startedAt: runRow.startedAt,
+      finishedAt: runRow.finishedAt,
+      error: runRow.error,
+      stepRuns: stepRunRows.map(toStepRunDetailResponse),
+    };
+  }
+
+  /**
+   * Proves, in one round trip, that `workflowId` belongs to `projectId`
+   * and that `projectId` is owned by the actor — the same
+   * `EXISTS`-correlated-subquery pattern `WorkflowsService`/
+   * `WorkflowStepsService` use elsewhere. Only needed by `findRunDetail`
+   * today; `getSummaryMetrics` is read-only and relies on its caller
+   * (`WorkflowsService.findOverview`) to have already proven ownership.
+   */
+  private async assertOwnedWorkflow(
+    actor: AuthenticatedActor,
+    projectId: string,
+    workflowId: string,
+  ): Promise<void> {
+    const [row] = await this.db
+      .select({ id: workflows.id })
+      .from(workflows)
+      .where(
+        and(
+          eq(workflows.id, workflowId),
+          eq(workflows.projectId, projectId),
+          exists(
+            this.db
+              .select()
+              .from(projects)
+              .where(
+                and(
+                  eq(projects.id, workflows.projectId),
+                  eq(projects.ownerId, actor.userId),
+                ),
+              ),
+          ),
+        ),
+      );
+
+    if (!row) {
+      const [projectRow] = await this.db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(
+          and(eq(projects.id, projectId), eq(projects.ownerId, actor.userId)),
+        );
+      if (!projectRow) {
+        throw new ProjectNotFoundError();
+      }
+      throw new WorkflowNotFoundError();
+    }
+  }
+
   private async computeStatusCounts(workflowId: string): Promise<{
     total: number;
     success: number;
@@ -668,6 +780,27 @@ function normalizeOutputForPersistence(
     return output as Record<string, unknown>;
   }
   return { value: output };
+}
+
+function toStepRunDetailResponse(row: {
+  id: string;
+  workflowRunId: string;
+  workflowStepId: string;
+  position: number;
+  status: string;
+  inputSnapshot: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  error: string | null;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  stepKey: string;
+  type: string;
+}): StepRunDetailResponse {
+  return {
+    ...toStepRunResponse(row),
+    stepKey: row.stepKey,
+    type: row.type as StepRunDetailResponse['type'],
+  };
 }
 
 function toStepRunResponse(row: {

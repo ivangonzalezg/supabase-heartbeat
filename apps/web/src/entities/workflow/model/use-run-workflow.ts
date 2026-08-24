@@ -7,7 +7,7 @@ import {
 } from "@supabase-heartbeat/validation"
 import { workspaceSummaryQueryKey } from "@/shared/api"
 
-const stepRunResponseSchema = z.object({
+export const stepRunResponseSchema = z.object({
   id: z.string(),
   workflowRunId: z.string(),
   workflowStepId: z.string(),

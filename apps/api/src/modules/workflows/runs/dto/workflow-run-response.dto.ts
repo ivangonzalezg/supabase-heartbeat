@@ -3,13 +3,17 @@ import {
   workflowRunStatuses,
   workflowRunTriggerTypes,
   stepRunStatuses,
+  workflowStepTypes,
   type WorkflowRunStatus,
   type WorkflowRunTriggerType,
   type StepRunStatus,
+  type WorkflowStepType,
 } from '@supabase-heartbeat/validation';
 import type {
+  StepRunDetailResponse,
   StepRunResponse,
   WorkflowRunDetailResponse,
+  WorkflowRunDetailWithStepsResponse,
 } from '../workflow-runs.types';
 
 /**
@@ -180,4 +184,79 @@ export class WorkflowRunResponseDto implements WorkflowRunDetailResponse {
     type: [StepRunResponseDto],
   })
   stepRuns!: StepRunResponseDto[];
+}
+
+/**
+ * Documentation adapter for `StepRunDetailResponse` — `StepRunResponse`
+ * enriched with the owning step's `stepKey`/`type`, used only by
+ * `GET .../runs/:runId`.
+ */
+export class StepRunDetailResponseDto
+  extends StepRunResponseDto
+  implements StepRunDetailResponse
+{
+  @ApiProperty({
+    description: "The executed step's stable key.",
+    example: 'authenticate_test_user',
+  })
+  stepKey!: string;
+
+  @ApiProperty({
+    description: "The executed step's type.",
+    enum: workflowStepTypes,
+    example: 'signin',
+  })
+  type!: WorkflowStepType;
+}
+
+/**
+ * Documentation adapter for `WorkflowRunDetailWithStepsResponse`
+ * (`workflow-runs.types.ts`) — the `GET .../runs/:runId` response shape.
+ */
+export class WorkflowRunDetailWithStepsResponseDto implements WorkflowRunDetailWithStepsResponse {
+  @ApiProperty({ description: 'The workflow-run ID.' })
+  id!: string;
+
+  @ApiProperty({ description: 'The parent workflow ID.' })
+  workflowId!: string;
+
+  @ApiProperty({
+    description: 'How this run was triggered.',
+    enum: workflowRunTriggerTypes,
+    example: 'manual',
+  })
+  triggerType!: WorkflowRunTriggerType;
+
+  @ApiProperty({
+    description: 'The final run status.',
+    enum: workflowRunStatuses,
+    example: 'success',
+  })
+  status!: WorkflowRunStatus;
+
+  @ApiProperty({ description: 'When execution started.', nullable: true })
+  startedAt!: Date | null;
+
+  @ApiProperty({
+    description: 'When execution finished (successfully or not).',
+    nullable: true,
+  })
+  finishedAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      'A short, safe error message when `status` is `failed`, `null` ' +
+      'on `success`.',
+    nullable: true,
+    example: null,
+  })
+  error!: string | null;
+
+  @ApiProperty({
+    description:
+      'The ordered step runs actually attempted during this run, in ' +
+      "execution order, each enriched with its step's `stepKey`/`type`.",
+    type: [StepRunDetailResponseDto],
+  })
+  stepRuns!: StepRunDetailResponseDto[];
 }

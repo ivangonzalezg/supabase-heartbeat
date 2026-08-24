@@ -69,7 +69,10 @@ Currently implemented:
 * Partial string interpolation (a reference embedded inside a larger
   string) and expressions/arithmetic/fallback values built on top of
   output references — only whole-value references are implemented.
-* Run-history read endpoints (`GET` list/detail for past runs).
+* A dedicated run-history *list* endpoint with pagination/filtering —
+  the bounded last-10-runs list is only available bundled into `GET
+  .../workflows/:workflowId/overview` (see "Workflow Runs API" below).
+  Single-run detail (`GET .../runs/:runId`) is implemented.
 * Remote-operation compensation/rollback — a later step's failure never
   reverses an earlier step's already-committed Supabase side effects.
 * Project sharing / multi-user access to the same project.
@@ -1058,6 +1061,20 @@ each entry's `failedStepKey` is the `stepKey` of the step that failed
 (resolved via `workflow_steps`), `null` for a non-failed run or a failed
 run with no resolvable failed step.
 
+`GET /api/projects/:projectId/workflows/:workflowId/runs/:runId`
+(`src/modules/workflows/runs/`, both admin and viewer) returns one run's
+full detail: the same fields as a `recentRuns` entry (id, status,
+triggerType, timestamps) plus its complete ordered `stepRuns` array,
+each step run enriched with the executed step's `stepKey`/`type` (via a
+join to `workflow_steps`) so a run-details UI can render every step's
+title without a second request. Only steps that were actually attempted
+appear — if execution stopped early due to a failure, steps after the
+failed one are absent (they were never attempted, and — see "Execution
+order and scope" below — no `skipped` row is ever persisted for them).
+A run that does not exist, or belongs to a different workflow than the
+one in the route, is reported as `404`, identically to every other
+ownership/existence failure in this API.
+
 **Ownership** is proven through the same hierarchy pattern as the rest
 of the Workflows API (`projects.id = :projectId AND projects.owner_id =
 actor.userId AND workflows.id = :workflowId AND workflows.project_id =
@@ -1525,6 +1542,7 @@ GET    /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Read
 PATCH  /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Partially update a step, excluding position (admin only)
 DELETE /api/projects/:projectId/workflows/:workflowId/steps/:stepId       # Delete a step and compact positions (admin only)
 POST   /api/projects/:projectId/workflows/:workflowId/runs                # Synchronously execute a workflow's enabled steps in order (admin only)
+GET    /api/projects/:projectId/workflows/:workflowId/runs/:runId         # Read one run's full detail, including its ordered step runs
 ```
 
 See "Projects API", "Workflows API", "Workflow Steps API", and

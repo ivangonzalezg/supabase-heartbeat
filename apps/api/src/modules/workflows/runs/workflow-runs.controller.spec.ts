@@ -4,7 +4,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { WorkflowRunsController } from './workflow-runs.controller';
 import { WorkflowRunsService } from './workflow-runs.service';
-import type { WorkflowRunDetailResponse } from './workflow-runs.types';
+import type {
+  WorkflowRunDetailResponse,
+  WorkflowRunDetailWithStepsResponse,
+} from './workflow-runs.types';
 
 function buildSession(role: 'admin' | 'viewer'): UserSession {
   return {
@@ -24,8 +27,29 @@ const sampleRun: WorkflowRunDetailResponse = {
   stepRuns: [],
 };
 
+const sampleRunDetail: WorkflowRunDetailWithStepsResponse = {
+  ...sampleRun,
+  stepRuns: [
+    {
+      id: 'step-run-1',
+      workflowRunId: 'run-1',
+      workflowStepId: 'step-1',
+      position: 0,
+      status: 'success',
+      inputSnapshot: null,
+      output: null,
+      error: null,
+      startedAt: new Date('2026-01-01T00:00:00.000Z'),
+      finishedAt: new Date('2026-01-01T00:00:01.000Z'),
+      stepKey: 'sign_in',
+      type: 'signin',
+    },
+  ],
+};
+
 const mockWorkflowRunsService = {
   executeManual: jest.fn<WorkflowRunsService['executeManual']>(),
+  findRunDetail: jest.fn<WorkflowRunsService['findRunDetail']>(),
 };
 
 describe('WorkflowRunsController', () => {
@@ -100,6 +124,25 @@ describe('WorkflowRunsController', () => {
       'a-specific-project-id',
       'a-specific-workflow-id',
     );
+  });
+
+  it('findRunDetail() delegates to the service with the actor, project ID, workflow ID, and run ID', async () => {
+    mockWorkflowRunsService.findRunDetail.mockResolvedValue(sampleRunDetail);
+
+    const result = await controller.findRunDetail(
+      buildSession('viewer'),
+      'project-1',
+      'workflow-1',
+      'run-1',
+    );
+
+    expect(mockWorkflowRunsService.findRunDetail).toHaveBeenCalledWith(
+      { userId: 'user-1', role: 'viewer' },
+      'project-1',
+      'workflow-1',
+      'run-1',
+    );
+    expect(result).toEqual(sampleRunDetail);
   });
 
   it('declares admin-only role metadata on the execute() route', () => {
