@@ -136,7 +136,16 @@ hides: it renders its name/status as a skeleton only in the brief moment
 neither data source has resolved yet, while its action buttons (`Run
 now`, `Edit`, `Disable`/`Enable`, the delete dropdown) always render.
 `Edit` links to `/projects/$projectId/workflows/$workflowId/edit`
-(`pages/edit-workflow`, see below). Duration and relative-timestamp
+(`pages/edit-workflow`, see below). `Disable`/`Enable` is fully wired:
+clicking it opens a shadcn `AlertDialog` ("Disable/Enable this workflow?")
+before anything happens — confirming either direction runs the mutation,
+canceling does nothing. `WorkflowHeader` owns the mutation itself (via
+`entities/workflow`'s `useUpdateWorkflow`, `PATCH
+/api/projects/:projectId/workflows/:workflowId` with just `{ enabled }`),
+and on success invalidates both the workspace summary and
+`["workflow-overview", ...]` so the badge and every dependent query
+(including the sidebar) reflect the new status; a failed toggle shows a
+`sonner` error toast and leaves `enabled` unchanged. Duration and relative-timestamp
 formatting (`"3.6s"`, `"Today, 09:00 AM"`) live in
 `pages/workflow-overview/lib/format-duration.ts` and
 `format-run-timestamp.ts`, shared between the summary card and the runs

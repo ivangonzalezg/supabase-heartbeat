@@ -18,6 +18,11 @@ export type {
   ReplaceWorkflowInput,
   ReplaceWorkflowStepInput,
 } from "./model/use-replace-workflow"
+export { useUpdateWorkflow } from "./model/use-update-workflow"
+export type {
+  UpdateWorkflowInput,
+  WorkflowResponse,
+} from "./model/use-update-workflow"
 export {
   summarizeStep,
   summarizeStepFields,

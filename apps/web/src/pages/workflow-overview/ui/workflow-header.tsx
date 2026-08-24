@@ -1,6 +1,17 @@
 import { EllipsisIcon, PlayIcon, Trash2Icon } from "lucide-react"
 import { Link } from "@tanstack/react-router"
+import { toast } from "sonner"
+import { useUpdateWorkflow } from "@/entities/workflow"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
   Badge,
   Button,
   DropdownMenu,
@@ -8,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Skeleton,
+  Spinner,
 } from "@/shared/ui"
 import { cn } from "@/shared/lib/utils"
 
@@ -27,16 +39,31 @@ export function WorkflowHeader({
   workflowName: string | undefined
   enabled: boolean | undefined
   /**
-   * True while the workflow-overview data is being (re)fetched. These
-   * action buttons are not wired to any real mutation yet — they are
-   * always visually disabled today — but they should also become
-   * unavailable during a fetch once they are, so the disabled state is
-   * derived from both conditions rather than hardcoded, ready for that
-   * later change.
+   * True while the workflow-overview data is being (re)fetched. `Run
+   * now` and the delete dropdown item are not wired to a real mutation
+   * yet, so they stay hardcoded `disabled`; the more-actions trigger is
+   * gated on this instead.
    */
   isFetching?: boolean
 }) {
   const hasData = workflowName !== undefined && enabled !== undefined
+  const updateWorkflow = useUpdateWorkflow()
+
+  async function handleToggleEnabled() {
+    if (enabled === undefined) return
+    try {
+      await updateWorkflow.mutateAsync({
+        projectId,
+        workflowId,
+        enabled: !enabled,
+      })
+    } catch {
+      toast.error(
+        enabled ? "Failed to disable workflow" : "Failed to enable workflow",
+        { description: "Please try again." }
+      )
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -85,9 +112,37 @@ export function WorkflowHeader({
               Edit
             </Link>
           </Button>
-          <Button type="button" variant="outline" className="bg-card" disabled>
-            {enabled ? "Disable" : "Enable"}
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="bg-card"
+                disabled={!hasData || updateWorkflow.isPending}
+              >
+                {updateWorkflow.isPending && <Spinner />}
+                {enabled ? "Disable" : "Enable"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {enabled ? "Disable this workflow?" : "Enable this workflow?"}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {enabled
+                    ? "It will stop running on its schedule until you enable it again."
+                    : "It will resume running on its schedule."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void handleToggleEnabled()}>
+                  {enabled ? "Disable" : "Enable"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

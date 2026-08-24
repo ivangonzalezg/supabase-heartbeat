@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -8,7 +10,21 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
+import { toast } from "sonner"
 import { WorkflowHeader } from "./workflow-header"
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+  },
+}))
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
+}
 
 async function renderWithRouter(
   props: React.ComponentProps<typeof WorkflowHeader>
@@ -31,8 +47,15 @@ async function renderWithRouter(
       initialEntries: ["/projects/project-1/workflows/workflow-1"],
     }),
   })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
 
-  const result = render(<RouterProvider router={router} />)
+  const result = render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  )
   await waitFor(() =>
     expect(screen.getByRole("button", { name: /run now/i })).toBeInTheDocument()
   )
@@ -40,6 +63,11 @@ async function renderWithRouter(
 }
 
 describe("WorkflowHeader", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(toast.error).mockReset()
+  })
+
   it("renders the workflow name", async () => {
     await renderWithRouter({
       projectId: "project-1",
@@ -153,5 +181,133 @@ describe("WorkflowHeader", () => {
     expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(2)
     expect(screen.getByRole("button", { name: /run now/i })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /^edit$/i })).toBeInTheDocument()
+  })
+
+  it("PATCHes enabled: false when clicking Disable on an enabled workflow", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        id: "workflow-1",
+        projectId: "project-1",
+        name: "Daily activity",
+        description: null,
+        cronExpression: "0 9 * * *",
+        timezone: "UTC",
+        enabled: false,
+        overlapPolicy: "skip",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })
+    )
+    const user = userEvent.setup()
+
+    await renderWithRouter({
+      projectId: "project-1",
+      workflowId: "workflow-1",
+      workflowName: "Daily activity",
+      enabled: true,
+    })
+
+    await user.click(screen.getByRole("button", { name: /^disable$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: /^disable$/i }))
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/api/projects/project-1/workflows/workflow-1",
+        expect.objectContaining({ method: "PATCH" })
+      )
+    })
+    const [, requestInit] = fetchSpy.mock.calls[0]
+    expect(JSON.parse(requestInit?.body as string)).toEqual({
+      enabled: false,
+    })
+  })
+
+  it("PATCHes enabled: true when clicking Enable on a disabled workflow", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        id: "workflow-1",
+        projectId: "project-1",
+        name: "Daily activity",
+        description: null,
+        cronExpression: "0 9 * * *",
+        timezone: "UTC",
+        enabled: true,
+        overlapPolicy: "skip",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })
+    )
+    const user = userEvent.setup()
+
+    await renderWithRouter({
+      projectId: "project-1",
+      workflowId: "workflow-1",
+      workflowName: "Daily activity",
+      enabled: false,
+    })
+
+    await user.click(screen.getByRole("button", { name: /^enable$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: /^enable$/i }))
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/api/projects/project-1/workflows/workflow-1",
+        expect.objectContaining({ method: "PATCH" })
+      )
+    })
+    const [, requestInit] = fetchSpy.mock.calls[0]
+    expect(JSON.parse(requestInit?.body as string)).toEqual({ enabled: true })
+  })
+
+  it("shows a confirmation dialog before disabling, and cancel does not send a request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    const user = userEvent.setup()
+
+    await renderWithRouter({
+      projectId: "project-1",
+      workflowId: "workflow-1",
+      workflowName: "Daily activity",
+      enabled: true,
+    })
+
+    await user.click(screen.getByRole("button", { name: /^disable$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText("Disable this workflow?")
+    ).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      "/api/projects/project-1/workflows/workflow-1",
+      expect.objectContaining({ method: "PATCH" })
+    )
+  })
+
+  it("shows an error toast when the toggle request fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 500 })
+    )
+    const user = userEvent.setup()
+
+    await renderWithRouter({
+      projectId: "project-1",
+      workflowId: "workflow-1",
+      workflowName: "Daily activity",
+      enabled: true,
+    })
+
+    await user.click(screen.getByRole("button", { name: /^disable$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: /^disable$/i }))
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Failed to disable workflow", {
+        description: "Please try again.",
+      })
+    )
   })
 })
