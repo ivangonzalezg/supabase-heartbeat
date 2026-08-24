@@ -53,6 +53,7 @@ const mockWorkflowsService = {
   findById: jest.fn<WorkflowsService['findById']>(),
   findOverview: jest.fn<WorkflowsService['findOverview']>(),
   update: jest.fn<WorkflowsService['update']>(),
+  replace: jest.fn<WorkflowsService['replace']>(),
   delete: jest.fn<WorkflowsService['delete']>(),
 };
 
@@ -165,6 +166,37 @@ describe('WorkflowsController', () => {
       input,
     );
     expect(result).toEqual(sampleWorkflow);
+  });
+
+  it('replace() delegates to the service with the actor, project ID, workflow ID, and input', async () => {
+    mockWorkflowsService.replace.mockResolvedValue(sampleWorkflowDetail);
+    const input = {
+      name: 'Renamed',
+      cronExpression: '0 */6 * * *',
+      timezone: 'UTC',
+      steps: [
+        {
+          stepKey: 'wait_1',
+          type: 'wait' as const,
+          configuration: { seconds: 5 },
+        },
+      ],
+    };
+
+    const result = await controller.replace(
+      buildSession('admin'),
+      'project-1',
+      'workflow-1',
+      input,
+    );
+
+    expect(mockWorkflowsService.replace).toHaveBeenCalledWith(
+      { userId: 'user-1', role: 'admin' },
+      'project-1',
+      'workflow-1',
+      input,
+    );
+    expect(result).toEqual(sampleWorkflowDetail);
   });
 
   it('delete() delegates to the service with the actor, project ID, and workflow ID', async () => {

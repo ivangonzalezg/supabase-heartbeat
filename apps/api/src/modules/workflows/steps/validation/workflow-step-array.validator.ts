@@ -8,6 +8,10 @@ import { MAX_STEPS_PER_WORKFLOW } from './workflow-step.validator';
 
 interface StepLike {
   stepKey?: unknown;
+  type?: unknown;
+  configuration?: unknown;
+  enabled?: unknown;
+  id?: unknown;
 }
 
 function findDuplicateStepKey(steps: StepLike[]): string | undefined {
@@ -22,6 +26,23 @@ function findDuplicateStepKey(steps: StepLike[]): string | undefined {
     seen.add(step.stepKey);
   }
   return undefined;
+}
+
+/**
+ * Strips every property except the shared step schema's own fields
+ * before parsing — in particular, a `ReplaceWorkflowStepDto`'s optional
+ * `id` (present when the aggregate workflow-replace endpoint's `steps`
+ * entry identifies an existing step to update) is not part of
+ * `workflowStepCreateSchema`'s `strictObject` shape and would otherwise
+ * be rejected as an unrecognized key.
+ */
+function extractStepShape(step: StepLike): Omit<StepLike, 'id'> {
+  return {
+    stepKey: step.stepKey,
+    type: step.type,
+    configuration: step.configuration,
+    enabled: step.enabled,
+  };
 }
 
 /**
@@ -54,7 +75,10 @@ export function IsWorkflowStepArray(
             return false;
           }
           return value.every(
-            (step) => workflowStepCreateSchema.safeParse(step).success,
+            (step) =>
+              workflowStepCreateSchema.safeParse(
+                extractStepShape(step as StepLike),
+              ).success,
           );
         },
         defaultMessage(args: ValidationArguments) {
@@ -73,7 +97,9 @@ export function IsWorkflowStepArray(
             return `${args.property} contains a duplicate stepKey: "${duplicate}".`;
           }
           for (let index = 0; index < value.length; index += 1) {
-            const result = workflowStepCreateSchema.safeParse(value[index]);
+            const result = workflowStepCreateSchema.safeParse(
+              extractStepShape(value[index] as StepLike),
+            );
             if (!result.success) {
               const [firstIssue] = result.error.issues;
               const path = firstIssue?.path.join('.') || '(root)';

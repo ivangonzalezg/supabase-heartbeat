@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 import {
   ApiCookieAuth,
@@ -25,6 +26,7 @@ import { Roles, Session } from '@thallesp/nestjs-better-auth';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { toAuthenticatedActor } from '../../lib/authorization/current-actor';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
+import { ReplaceWorkflowDto } from './dto/replace-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import {
   WorkflowDetailResponseDto,
@@ -209,6 +211,48 @@ export class WorkflowsController {
     @Body() input: UpdateWorkflowDto,
   ): Promise<WorkflowResponse> {
     return this.workflowsService.update(
+      toAuthenticatedActor(session),
+      projectId,
+      workflowId,
+      input,
+    );
+  }
+
+  @Put(':workflowId')
+  @Roles(['admin'])
+  @ApiOperation({
+    summary: 'Replace a workflow and its complete ordered step list',
+    description:
+      'Admin only, ownership-scoped through the parent project. Unlike ' +
+      '`PATCH :workflowId` (metadata-only, partial), this replaces the ' +
+      "workflow's metadata AND its steps together in a single database " +
+      'transaction. Each entry in `steps` with an `id` updates that ' +
+      'existing step in place; an entry with no `id` (or an `id` not ' +
+      "matching any of the workflow's current steps) creates a new " +
+      'step; any current step whose `id` is absent from `steps` is ' +
+      'deleted. Array order defines the persisted position (steps[0] is ' +
+      'position 0, and so on). At least one step is required. If any ' +
+      'part of the operation fails, nothing is persisted. A workflow ' +
+      'that does not exist, belongs to a different project, or whose ' +
+      'project is owned by another user is reported as 404.',
+  })
+  @ApiOkResponse({
+    description: 'The updated workflow, including its ordered steps.',
+    type: WorkflowDetailResponseDto,
+  })
+  @ApiForbiddenResponse({ description: 'The actor is not an admin.' })
+  @ApiNotFoundResponse({
+    description:
+      'The project or workflow does not exist, or is not accessible to ' +
+      'the current actor.',
+  })
+  async replace(
+    @Session() session: UserSession,
+    @Param('projectId') projectId: string,
+    @Param('workflowId') workflowId: string,
+    @Body() input: ReplaceWorkflowDto,
+  ): Promise<WorkflowDetailResponse> {
+    return this.workflowsService.replace(
       toAuthenticatedActor(session),
       projectId,
       workflowId,

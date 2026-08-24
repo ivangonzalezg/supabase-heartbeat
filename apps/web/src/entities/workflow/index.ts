@@ -13,6 +13,11 @@ export type {
   WorkflowRunSummaryMetrics,
   WorkflowRunListItem,
 } from "./model/use-workflow-overview"
+export { useReplaceWorkflow } from "./model/use-replace-workflow"
+export type {
+  ReplaceWorkflowInput,
+  ReplaceWorkflowStepInput,
+} from "./model/use-replace-workflow"
 export {
   summarizeStep,
   summarizeStepFields,

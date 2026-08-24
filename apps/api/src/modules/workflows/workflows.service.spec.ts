@@ -721,6 +721,295 @@ describe('WorkflowsService', () => {
     });
   });
 
+  describe('replace', () => {
+    const seedThreeSteps = () =>
+      service.create(adminAActor, projectA.id, {
+        ...validCreateInput,
+        steps: [
+          { stepKey: 'first', type: 'wait', configuration: { seconds: 1 } },
+          { stepKey: 'second', type: 'wait', configuration: { seconds: 2 } },
+          { stepKey: 'third', type: 'wait', configuration: { seconds: 3 } },
+        ],
+      });
+
+    it('updates workflow metadata', async () => {
+      const created = await seedThreeSteps();
+
+      const replaced = await service.replace(
+        adminAActor,
+        projectA.id,
+        created.id,
+        {
+          name: 'Renamed workflow',
+          cronExpression: '0 12 * * *',
+          timezone: 'America/Bogota',
+          enabled: false,
+          overlapPolicy: 'skip',
+          steps: created.steps.map((step) => ({
+            id: step.id,
+            stepKey: step.stepKey,
+            type: step.type as 'wait',
+            configuration: step.configuration,
+            enabled: step.enabled,
+          })),
+        },
+      );
+
+      expect(replaced.name).toBe('Renamed workflow');
+      expect(replaced.cronExpression).toBe('0 12 * * *');
+      expect(replaced.timezone).toBe('America/Bogota');
+      expect(replaced.enabled).toBe(false);
+    });
+
+    it("keeps an existing step's id when updating it in place", async () => {
+      const created = await seedThreeSteps();
+      const [first] = created.steps;
+
+      const replaced = await service.replace(
+        adminAActor,
+        projectA.id,
+        created.id,
+        {
+          ...validCreateInput,
+          steps: created.steps.map((step) =>
+            step.id === first.id
+              ? {
+                  id: step.id,
+                  stepKey: step.stepKey,
+                  type: 'wait' as const,
+                  configuration: { seconds: 99 },
+                  enabled: step.enabled,
+                }
+              : {
+                  id: step.id,
+                  stepKey: step.stepKey,
+                  type: step.type as 'wait',
+                  configuration: step.configuration,
+                  enabled: step.enabled,
+                },
+          ),
+        },
+      );
+
+      const updatedFirst = replaced.steps.find((step) => step.id === first.id);
+      expect(updatedFirst).toMatchObject({
+        stepKey: 'first',
+        configuration: { seconds: 99 },
+      });
+    });
+
+    it('creates a new step for an entry with no id', async () => {
+      const created = await seedThreeSteps();
+
+      const replaced = await service.replace(
+        adminAActor,
+        projectA.id,
+        created.id,
+        {
+          ...validCreateInput,
+          steps: [
+            ...created.steps.map((step) => ({
+              id: step.id,
+              stepKey: step.stepKey,
+              type: step.type as 'wait',
+              configuration: step.configuration,
+              enabled: step.enabled,
+            })),
+            { stepKey: 'fourth', type: 'wait', configuration: { seconds: 4 } },
+          ],
+        },
+      );
+
+      expect(replaced.steps).toHaveLength(4);
+      expect(replaced.steps.map((step) => step.stepKey)).toEqual([
+        'first',
+        'second',
+        'third',
+        'fourth',
+      ]);
+
+      const persisted = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, created.id));
+      expect(persisted).toHaveLength(4);
+    });
+
+    it('deletes a step whose id is absent from the submitted steps', async () => {
+      const created = await seedThreeSteps();
+      const [first, , third] = created.steps;
+
+      const replaced = await service.replace(
+        adminAActor,
+        projectA.id,
+        created.id,
+        {
+          ...validCreateInput,
+          steps: [
+            {
+              id: first.id,
+              stepKey: first.stepKey,
+              type: 'wait' as const,
+              configuration: first.configuration,
+              enabled: first.enabled,
+            },
+            {
+              id: third.id,
+              stepKey: third.stepKey,
+              type: 'wait' as const,
+              configuration: third.configuration,
+              enabled: third.enabled,
+            },
+          ],
+        },
+      );
+
+      expect(replaced.steps).toHaveLength(2);
+      expect(replaced.steps.map((step) => step.stepKey)).toEqual([
+        'first',
+        'third',
+      ]);
+
+      const persisted = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, created.id));
+      expect(persisted).toHaveLength(2);
+    });
+
+    it('reorders steps to match the submitted array order and reassigns positions', async () => {
+      const created = await seedThreeSteps();
+      const [first, second, third] = created.steps;
+
+      const replaced = await service.replace(
+        adminAActor,
+        projectA.id,
+        created.id,
+        {
+          ...validCreateInput,
+          steps: [third, second, first].map((step) => ({
+            id: step.id,
+            stepKey: step.stepKey,
+            type: step.type as 'wait',
+            configuration: step.configuration,
+            enabled: step.enabled,
+          })),
+        },
+      );
+
+      expect(
+        replaced.steps.map((step) => [step.stepKey, step.position]),
+      ).toEqual([
+        ['third', 0],
+        ['second', 1],
+        ['first', 2],
+      ]);
+
+      const persisted = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, created.id));
+      const positions = persisted.map((step) => step.position).sort();
+      expect(positions).toEqual([0, 1, 2]);
+    });
+
+    it('rolls back everything when a step in the diff violates a constraint', async () => {
+      const created = await seedThreeSteps();
+      const beforeSteps = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, created.id));
+      const beforeWorkflow = await db
+        .select()
+        .from(schema.workflows)
+        .where(eq(schema.workflows.id, created.id));
+
+      await expect(
+        service.replace(adminAActor, projectA.id, created.id, {
+          ...validCreateInput,
+          name: 'Should not persist',
+          steps: [
+            {
+              id: created.steps[0].id,
+              stepKey: 'duplicate',
+              type: 'wait',
+              configuration: { seconds: 1 },
+            },
+            {
+              id: created.steps[1].id,
+              stepKey: 'duplicate',
+              type: 'wait',
+              configuration: { seconds: 2 },
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+
+      const afterSteps = await db
+        .select()
+        .from(schema.workflowSteps)
+        .where(eq(schema.workflowSteps.workflowId, created.id));
+      const afterWorkflow = await db
+        .select()
+        .from(schema.workflows)
+        .where(eq(schema.workflows.id, created.id));
+
+      expect(afterSteps).toEqual(beforeSteps);
+      expect(afterWorkflow).toEqual(beforeWorkflow);
+    });
+
+    it('rejects an admin replacing a workflow under a project they do not own', async () => {
+      const created = await seedThreeSteps();
+
+      await expect(
+        service.replace(adminBActor, projectA.id, created.id, {
+          ...validCreateInput,
+          steps: created.steps.map((step) => ({
+            id: step.id,
+            stepKey: step.stepKey,
+            type: step.type as 'wait',
+            configuration: step.configuration,
+            enabled: step.enabled,
+          })),
+        }),
+      ).rejects.toThrow(ProjectNotFoundError);
+    });
+
+    it('rejects replacing a workflow that does not belong to the route project', async () => {
+      const created = await seedThreeSteps();
+
+      await expect(
+        service.replace(adminBActor, projectB.id, created.id, {
+          ...validCreateInput,
+          steps: created.steps.map((step) => ({
+            id: step.id,
+            stepKey: step.stepKey,
+            type: step.type as 'wait',
+            configuration: step.configuration,
+            enabled: step.enabled,
+          })),
+        }),
+      ).rejects.toThrow(WorkflowNotFoundError);
+    });
+
+    it('rejects a viewer attempting to replace', async () => {
+      const created = await seedThreeSteps();
+
+      await expect(
+        service.replace(viewerAActor, projectA.id, created.id, {
+          ...validCreateInput,
+          steps: created.steps.map((step) => ({
+            id: step.id,
+            stepKey: step.stepKey,
+            type: step.type as 'wait',
+            configuration: step.configuration,
+            enabled: step.enabled,
+          })),
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
   describe('delete', () => {
     it('lets an admin delete an owned workflow', async () => {
       const created = await service.create(

@@ -1,6 +1,7 @@
 import * as React from "react"
 import { useFieldArray, useFormContext } from "react-hook-form"
 import { DragDropProvider, type DragEndEvent } from "@dnd-kit/react"
+import { isSortableOperation } from "@dnd-kit/react/sortable"
 import { PlusIcon } from "lucide-react"
 import { Accordion, Button, FieldDescription, FieldError } from "@/shared/ui"
 import { emptyStepFor } from "./step-config-forms"
@@ -16,14 +17,20 @@ function generateStepKey(existingKeys: string[]): string {
   return key
 }
 
-export function WorkflowStepsField() {
+export function WorkflowStepsField({
+  initialExpanded = false,
+}: {
+  /** Whether every step's accordion starts expanded. See `WorkflowForm`'s
+   * `initialStepsExpanded` prop for the rationale. */
+  initialExpanded?: boolean
+}) {
   const { control, formState } = useFormContext()
   const { fields, append, remove, move } = useFieldArray({
     control,
     name: "steps",
   })
   const [expandedIndexes, setExpandedIndexes] = React.useState<string[]>(() =>
-    fields.map((_, index) => String(index))
+    initialExpanded ? fields.map((_, index) => String(index)) : []
   )
 
   function handleAddStep() {
@@ -33,7 +40,11 @@ export function WorkflowStepsField() {
     const newStep = emptyStepFor(generateStepKey(existingKeys))
     const newIndex = fields.length
     append(newStep)
-    setExpandedIndexes((prev) => [...prev, String(newIndex)])
+    // Only the newly added step starts expanded — every other step
+    // collapses, so the step the user is about to configure is the one
+    // thing on screen, instead of piling up an ever-growing list of open
+    // accordions.
+    setExpandedIndexes([String(newIndex)])
   }
 
   function handleRemove(index: number) {
@@ -49,13 +60,21 @@ export function WorkflowStepsField() {
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    const sourceId = event.operation.source?.id
-    const targetId = event.operation.target?.id
-    if (sourceId === undefined || targetId === undefined) return
+    if (event.canceled) return
+    if (!isSortableOperation(event.operation)) return
 
-    const fromIndex = fields.findIndex((field) => field.id === sourceId)
-    const toIndex = fields.findIndex((field) => field.id === targetId)
-    if (fromIndex === -1 || toIndex === -1) return
+    // `@dnd-kit/react/sortable`'s `OptimisticSortingPlugin` already
+    // live-reorders each sortable's `.index` as the drag moves over other
+    // items, so by `dragend` the dragged item's `initialIndex` -> `index`
+    // pair *is* the final from/to move — comparing `source`/`target` ids
+    // instead (as this used to) is unreliable, since both can report the
+    // same id once the optimistic reorder has already settled the
+    // dragged item into its new slot.
+    const { source } = event.operation
+    if (source === null) return
+    const fromIndex = source.initialIndex
+    const toIndex = source.index
+    if (fromIndex === toIndex) return
 
     move(fromIndex, toIndex)
   }
@@ -67,6 +86,22 @@ export function WorkflowStepsField() {
       : Array.isArray(stepsError)
         ? undefined
         : stepsError
+
+  // Any step with a validation error is force-expanded, even if its
+  // accordion is currently collapsed — otherwise an invalid field inside
+  // a collapsed step is invisible, and the form silently refuses to
+  // submit with no visible feedback. Derived at render time (not a
+  // `setState`-in-effect) since it's purely a function of existing state.
+  const errorIndexes =
+    formState.isSubmitted && Array.isArray(stepsError)
+      ? stepsError
+          .map((error, index) => (error ? String(index) : undefined))
+          .filter((value): value is string => value !== undefined)
+      : []
+  const visibleExpandedIndexes =
+    errorIndexes.length === 0
+      ? expandedIndexes
+      : Array.from(new Set([...expandedIndexes, ...errorIndexes]))
 
   return (
     <div className="flex flex-col gap-3">
@@ -83,7 +118,7 @@ export function WorkflowStepsField() {
         <DragDropProvider onDragEnd={handleDragEnd}>
           <Accordion
             type="multiple"
-            value={expandedIndexes}
+            value={visibleExpandedIndexes}
             onValueChange={setExpandedIndexes}
             className="flex flex-col gap-3"
           >

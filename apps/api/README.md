@@ -504,12 +504,13 @@ every endpoint requires an authenticated session; both `admin` and
 `WorkflowsService` defense-in-depth check). `admin` does not bypass
 project ownership.
 
-| Operation                           | Admin | Viewer |
+| Operation                            | Admin | Viewer |
 | ------------------------------------ | ----: | -----: |
 | List workflows in an owned project   |   Yes |    Yes |
 | Read workflow in an owned project    |   Yes |    Yes |
 | Create workflow in an owned project  |   Yes |     No |
 | Update workflow in an owned project  |   Yes |     No |
+| Replace workflow + steps (owned)     |   Yes |     No |
 | Delete workflow in an owned project  |   Yes |     No |
 
 **Authorization derives entirely from the parent project**:
@@ -569,6 +570,45 @@ database's own `CHECK` constraint.
 **`description` update semantics**: omit the field to leave it unchanged,
 send `null` to clear it, send a string to replace it — same convention as
 create.
+
+**Full replace with steps** (`PUT /api/projects/:projectId/workflows/:workflowId`,
+`WorkflowsService.replace`): unlike `PATCH` (metadata-only, partial), this
+replaces the workflow's metadata **and** its complete step list together
+in a single transaction — the same atomicity guarantee as `POST`, but for
+an existing workflow. Exists so a frontend "edit workflow" form that
+reuses the create form's full shape (metadata + drag-and-drop step list)
+can submit its entire state in one call, rather than diffing client-side
+and issuing the many separate calls the Workflow Steps API below would
+otherwise require (one `POST`/`PATCH`/`DELETE` per changed step, plus
+`PUT .../steps/order` for reordering).
+
+Request body mirrors `POST`'s shape (`name`, `cronExpression`, `timezone`
+required; `description`, `enabled`, `overlapPolicy` optional; `steps`
+required, nonempty, at most `MAX_STEPS_PER_WORKFLOW`), except each step
+entry may also carry an optional `id`:
+
+* An entry **with** an `id` matching one of the workflow's current steps
+  updates that row in place — its `id` and `createdAt` are preserved.
+* An entry **without** an `id` (or whose `id` matches no current step)
+  is inserted as a new step.
+* Any current step whose `id` is **absent** from the submitted array is
+  deleted.
+
+Array order is, as with `POST`, the proposed final execution order:
+`steps[0]` becomes position `0`, and so on. `validateWorkflowReferences`
+runs against the full proposed order before the transaction opens, so an
+invalid step-output reference leaves the workflow completely untouched —
+same rollback guarantee `POST` provides (verified in
+`workflows.service.spec.ts`, `describe('replace')`, "rolls back
+everything when a step in the diff violates a constraint"). Position
+rewrites use the same collision-safe two-pass temporary-offset technique
+as `applyContiguousPositions` in the Workflow Steps API (below), since
+`(workflow_id, position)` is uniquely constrained.
+
+**`id` is not validated as part of a step's shape**: `IsWorkflowStepArray`
+and `IsWorkflowStepInput` only ever inspect
+`stepKey`/`type`/`configuration`/`enabled` (the shared Zod schema's own
+fields), so an extra `id` property never affects per-step validation.
 
 **Response shape** (list — lightweight, no step configurations):
 
@@ -1442,6 +1482,7 @@ POST   /api/projects/:projectId/workflows                                 # Crea
 GET    /api/projects/:projectId/workflows/:workflowId                     # Read a workflow and its ordered steps in an owned project
 GET    /api/projects/:projectId/workflows/:workflowId/overview            # Workflow detail + operational summary metrics + last 10 runs
 PATCH  /api/projects/:projectId/workflows/:workflowId                     # Partially update a workflow (admin only)
+PUT    /api/projects/:projectId/workflows/:workflowId                     # Replace a workflow and its complete step list, transactionally (admin only)
 DELETE /api/projects/:projectId/workflows/:workflowId                     # Delete a workflow and its steps (admin only)
 GET    /api/projects/:projectId/workflows/:workflowId/steps               # List a workflow's steps
 POST   /api/projects/:projectId/workflows/:workflowId/steps               # Append a step (admin only)

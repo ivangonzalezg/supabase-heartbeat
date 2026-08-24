@@ -1,4 +1,5 @@
 import { EllipsisIcon, PlayIcon, Trash2Icon } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import {
   Badge,
   Button,
@@ -11,10 +12,14 @@ import {
 import { cn } from "@/shared/lib/utils"
 
 export function WorkflowHeader({
+  projectId,
+  workflowId,
   workflowName,
   enabled,
   isFetching = false,
 }: {
+  projectId: string
+  workflowId: string
   /** `undefined` only in the brief moment before either data source
    * (the overview fetch, or the cheaper workflow prefill) has data —
    * renders a name/status skeleton in that case only. The rest of the
@@ -46,13 +51,15 @@ export function WorkflowHeader({
                 className={cn(
                   enabled
                     ? "bg-success text-success-foreground"
-                    : "bg-secondary text-muted-foreground"
+                    : "bg-destructive-subtle text-destructive-subtle-foreground"
                 )}
               >
                 <span
                   className={cn(
                     "mr-1.5 size-1.5 rounded-full",
-                    enabled ? "bg-success-foreground" : "bg-muted-foreground"
+                    enabled
+                      ? "bg-success-foreground"
+                      : "bg-destructive-subtle-foreground"
                   )}
                 />
                 {enabled ? "Enabled" : "Disabled"}
@@ -70,8 +77,13 @@ export function WorkflowHeader({
             <PlayIcon />
             Run now
           </Button>
-          <Button type="button" variant="outline" className="bg-card" disabled>
-            Edit
+          <Button variant="outline" className="bg-card" asChild>
+            <Link
+              to="/projects/$projectId/workflows/$workflowId/edit"
+              params={{ projectId, workflowId }}
+            >
+              Edit
+            </Link>
           </Button>
           <Button type="button" variant="outline" className="bg-card" disabled>
             {enabled ? "Disable" : "Enable"}

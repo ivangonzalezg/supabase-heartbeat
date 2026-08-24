@@ -40,6 +40,8 @@ export function WorkflowOverviewPage() {
   return (
     <div className="flex min-h-full flex-col gap-6 p-6">
       <WorkflowHeader
+        projectId={projectId}
+        workflowId={workflowId}
         workflowName={workflowName}
         enabled={workflowEnabled}
         isFetching={overviewQuery.isFetching}

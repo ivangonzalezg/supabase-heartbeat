@@ -98,6 +98,8 @@ Each slice follows the FSD `api / model / ui / lib` segment convention.
 corresponding functionality is built, not created speculatively.
 `widgets/dashboard-layout` exists: the sidebar + layout shell wrapping
 every dashboard-area page (see "Routing" below for how it's wired in).
+`widgets/workflow-form` also exists: the workflow create/edit form,
+shared by `pages/create-workflow` and `pages/edit-workflow` (see below).
 `entities/session`, `entities/project`, and `entities/workflow` exist;
 `entities/project` and `entities/workflow` both read from the same
 `/api/workspace-summary` endpoint (defined once in `shared/api`, since
@@ -115,23 +117,49 @@ sidebar and `pages/overview` both pass `isAuthenticated` from
 `/projects/$projectId/workflows/$workflowId`, reached from the sidebar
 or after creating a workflow) shows a single workflow's name, enabled
 status, ordered steps, operational-summary metrics, and its 10 most
-recent runs. It uses two hooks together: `entities/workflow`'s existing
-`useWorkflow` (from `GET /api/projects/:projectId/workflows/:workflowId`)
-is called purely as a prefill/instant-paint mechanism — whatever's
-already cached from wherever the user navigated in from lets the header
-and step list render immediately — while `useWorkflowOverview` (from the
-newer, complete `GET .../workflows/:workflowId/overview` endpoint) is
-the actual source of truth for the whole page, including metrics and
-recent runs that `useWorkflow` doesn't carry. The operational-summary
-card and recent-runs table each render their own skeleton
-(`operational-summary-skeleton.tsx` / `recent-runs-table-skeleton.tsx`)
-while `useWorkflowOverview` is pending, independent of `useWorkflow`'s
-own loading state — no `useTransition`, just each query's own
-`isPending`/`isError`/success branch. Duration and relative-timestamp
+recent runs. It uses two hooks together: `entities/workflow`'s
+`useWorkflows` (the same `/api/workspace-summary` cache the sidebar,
+`widgets/dashboard-layout`, already populates) is read purely as a
+prefill/instant-paint mechanism — whatever's already cached from
+wherever the user navigated in from lets the header's name/enabled badge
+render immediately, with zero extra network request — while
+`useWorkflowOverview` (from the complete `GET
+.../workflows/:workflowId/overview` endpoint) is the single source of
+truth for everything else on the page: steps, operational-summary
+metrics, and recent runs. The operational-summary card, configured-steps
+panel, and recent-runs table each render their own skeleton
+(`operational-summary-skeleton.tsx` / `configured-steps-panel-skeleton.tsx`
+/ `recent-runs-table-skeleton.tsx`) while `useWorkflowOverview` is
+pending — no `useTransition`, just each query's own
+`isPending`/`isError`/success branch. `WorkflowHeader` itself never fully
+hides: it renders its name/status as a skeleton only in the brief moment
+neither data source has resolved yet, while its action buttons (`Run
+now`, `Edit`, `Disable`/`Enable`, the delete dropdown) always render.
+`Edit` links to `/projects/$projectId/workflows/$workflowId/edit`
+(`pages/edit-workflow`, see below). Duration and relative-timestamp
 formatting (`"3.6s"`, `"Today, 09:00 AM"`) live in
 `pages/workflow-overview/lib/format-duration.ts` and
 `format-run-timestamp.ts`, shared between the summary card and the runs
 table.
+
+`widgets/workflow-form` holds the workflow create/edit form (metadata
+fields, drag-and-drop step list, and every per-step-type field
+component under `ui/step-config-forms/`) as a single `WorkflowForm`
+component taking `defaultValues`/`onSubmit`/`submitLabel`/`title`/
+`description`/`cancelTo` props — it lives in `widgets/`, not either
+page, because `pages/create-workflow` and `pages/edit-workflow` (route
+`/projects/$projectId/workflows/$workflowId/edit`) both need it and
+steiger's FSD rules forbid one page slice importing another. Both pages
+are now thin wrappers: `create-workflow-page.tsx` supplies empty
+`defaultValues` and calls `useCreateWorkflow`; `edit-workflow-page.tsx`
+prefills `defaultValues` from `useWorkflowOverview` (including each
+step's `id`, threaded through as a hidden field so the backend can tell
+"update this step" from "create a new step" on submit) and calls the
+new `useReplaceWorkflow` (`PUT
+/api/projects/:projectId/workflows/:workflowId`) — a full replace of the
+workflow's metadata and complete step list in one request, chosen over
+reusing the many separate Workflow Steps API calls so the edit form's
+submission stays symmetric with create's ("send the whole form state").
 
 Cross-layer dependency rules (for example, `entities` must not import from
 `pages`) are enforced by [steiger](https://github.com/feature-sliced/steiger)
@@ -159,9 +187,19 @@ with the official `@feature-sliced/steiger-plugin`, `recommended` preset
 * `routes/sign-in-route.tsx` — `/sign-in`, nested directly under
   `rootRoute` (outside the dashboard layout — no sidebar on the sign-in
   screen).
+* `routes/create-workflow-route.tsx` — `/projects/$projectId/workflows/new`,
+  renders `pages/create-workflow`.
+* `routes/workflow-overview-route.tsx` —
+  `/projects/$projectId/workflows/$workflowId`, renders
+  `pages/workflow-overview`.
+* `routes/edit-workflow-route.tsx` —
+  `/projects/$projectId/workflows/$workflowId/edit`, renders
+  `pages/edit-workflow`.
 * `router.tsx` — builds the route tree: `rootRoute.addChildren([
-  dashboardLayoutRoute.addChildren([indexRoute]), signInRoute ])` and the
-  `router` instance; also declares the TanStack Router module augmentation
+  dashboardLayoutRoute.addChildren([indexRoute, createProjectRoute,
+  createWorkflowRoute, workflowOverviewRoute, editWorkflowRoute]),
+  signInRoute ])` and the `router` instance; also declares the TanStack
+  Router module augmentation
   (`declare module "@tanstack/react-router" { interface Register { router:
   typeof router } }`) for type-safe navigation.
 * `index.ts` — public API, exports `router`.
