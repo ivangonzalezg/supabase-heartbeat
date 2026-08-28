@@ -76,7 +76,20 @@ function renderAt(initialPath: string) {
       </SidebarProvider>
     ),
   })
-  const routeTree = rootRoute.addChildren([indexStub, workflowStub])
+  const projectOverviewStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/$projectId",
+    component: () => (
+      <SidebarProvider>
+        <NavProjects />
+      </SidebarProvider>
+    ),
+  })
+  const routeTree = rootRoute.addChildren([
+    indexStub,
+    workflowStub,
+    projectOverviewStub,
+  ])
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: [initialPath] }),
@@ -93,14 +106,25 @@ function renderAt(initialPath: string) {
 }
 
 describe("NavProjects", () => {
-  it("renders each workflow as a link to its overview page", async () => {
+  it("renders the project name as a link to its overview page", async () => {
+    mockFetch()
+
+    renderAt("/")
+
+    const link = await screen.findByRole("link", { name: "Artemivo" })
+    expect(link).toHaveAttribute("href", "/projects/project-1")
+  })
+
+  it("renders each workflow as a link to its overview page once expanded", async () => {
     mockFetch()
     const user = userEvent.setup()
 
     renderAt("/")
 
-    const projectButton = await screen.findByText("Artemivo")
-    await user.click(projectButton)
+    const expandButton = await screen.findByRole("button", {
+      name: "Expand workflows",
+    })
+    await user.click(expandButton)
 
     const link = await screen.findByRole("link", { name: "Daily activity" })
     expect(link).toHaveAttribute(

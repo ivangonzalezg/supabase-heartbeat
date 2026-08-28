@@ -76,7 +76,16 @@ function renderSidebar() {
     path: "/projects/new",
     component: () => null,
   })
-  const routeTree = rootRoute.addChildren([indexStub, createProjectStub])
+  const projectOverviewStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/$projectId",
+    component: () => null,
+  })
+  const routeTree = rootRoute.addChildren([
+    indexStub,
+    createProjectStub,
+    projectOverviewStub,
+  ])
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -116,7 +125,7 @@ describe("AppSidebar", () => {
     expect(await screen.findByText("Artemivo")).toBeInTheDocument()
   })
 
-  it("toggles workflow visibility when a project row is clicked", async () => {
+  it("toggles workflow visibility when the expand action is clicked", async () => {
     mockFetch({
       projects: [projectA],
       workflows: [
@@ -127,13 +136,19 @@ describe("AppSidebar", () => {
 
     renderSidebar()
 
-    const projectButton = await screen.findByText("Artemivo")
+    await screen.findByText("Artemivo")
     expect(screen.queryByText("Weekly CRUD")).not.toBeInTheDocument()
 
-    await user.click(projectButton)
+    const expandButton = await screen.findByRole("button", {
+      name: "Expand workflows",
+    })
+    await user.click(expandButton)
     expect(await screen.findByText("Weekly CRUD")).toBeInTheDocument()
 
-    await user.click(projectButton)
+    const collapseButton = await screen.findByRole("button", {
+      name: "Collapse workflows",
+    })
+    await user.click(collapseButton)
     expect(screen.queryByText("Weekly CRUD")).not.toBeInTheDocument()
   })
 

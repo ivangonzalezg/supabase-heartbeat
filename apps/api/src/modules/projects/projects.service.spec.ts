@@ -274,6 +274,273 @@ describe('ProjectsService', () => {
     });
   });
 
+  describe('findOverview', () => {
+    it('returns zeroed metrics and empty lists for a project with no workflows', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      expect(overview.id).toBe(created.id);
+      expect(overview.metrics).toEqual({
+        totalWorkflows: 0,
+        activeWorkflows: 0,
+        totalRuns: 0,
+        failedRuns: 0,
+        lastActivity: null,
+        nextRun: null,
+      });
+      expect(overview.workflows).toEqual([]);
+      expect(overview.recentRuns).toEqual([]);
+    });
+
+    it('counts total and active workflows', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      await db.insert(schema.workflows).values([
+        {
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Enabled workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          enabled: true,
+        },
+        {
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Disabled workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          enabled: false,
+        },
+      ]);
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      expect(overview.metrics.totalWorkflows).toBe(2);
+      expect(overview.metrics.activeWorkflows).toBe(1);
+      expect(overview.workflows).toHaveLength(2);
+    });
+
+    it('computes nextRun via cron for an enabled workflow and null for a disabled one', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      await db.insert(schema.workflows).values([
+        {
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Enabled workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          enabled: true,
+        },
+        {
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Disabled workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+          enabled: false,
+        },
+      ]);
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      const enabledSummary = overview.workflows.find((w) => w.enabled);
+      const disabledSummary = overview.workflows.find((w) => !w.enabled);
+      expect(enabledSummary?.nextRun).not.toBeNull();
+      expect(disabledSummary?.nextRun).toBeNull();
+      expect(overview.metrics.nextRun?.getTime()).toBe(
+        enabledSummary?.nextRun?.getTime(),
+      );
+    });
+
+    it("reports each workflow's last run and last status", async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      const [workflow] = await db
+        .insert(schema.workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      await db.insert(schema.workflowRuns).values({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        triggerType: 'manual',
+        status: 'success',
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      });
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      expect(overview.workflows[0].lastStatus).toBe('success');
+      expect(overview.workflows[0].lastRun).not.toBeNull();
+    });
+
+    it('windows totalRuns/failedRuns to the last 7 days', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      const [workflow] = await db
+        .insert(schema.workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      await db.insert(schema.workflowRuns).values([
+        {
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          triggerType: 'manual',
+          status: 'success',
+        },
+        {
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          triggerType: 'manual',
+          status: 'failed',
+        },
+        {
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          triggerType: 'manual',
+          status: 'failed',
+          createdAt: eightDaysAgo,
+        },
+      ]);
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      expect(overview.metrics.totalRuns).toBe(2);
+      expect(overview.metrics.failedRuns).toBe(1);
+    });
+
+    it('returns recent runs across every workflow in the project, most recent first', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      const [workflowA] = await db
+        .insert(schema.workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Workflow A',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      const [workflowB] = await db
+        .insert(schema.workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Workflow B',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      await db.insert(schema.workflowRuns).values({
+        id: crypto.randomUUID(),
+        workflowId: workflowA.id,
+        triggerType: 'manual',
+        status: 'success',
+        createdAt: new Date(Date.now() - 1000),
+      });
+      await db.insert(schema.workflowRuns).values({
+        id: crypto.randomUUID(),
+        workflowId: workflowB.id,
+        triggerType: 'scheduled',
+        status: 'failed',
+      });
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      expect(overview.recentRuns).toHaveLength(2);
+      expect(overview.recentRuns[0].workflowName).toBe('Workflow B');
+      expect(overview.recentRuns[1].workflowName).toBe('Workflow A');
+    });
+
+    it('resolves failedStepKey for a failed run in the recent-activity list', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      const [workflow] = await db
+        .insert(schema.workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+      const [step] = await db
+        .insert(schema.workflowSteps)
+        .values({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          stepKey: 'update_activity',
+          type: 'wait',
+          position: 0,
+          configuration: {},
+        })
+        .returning();
+      const [run] = await db
+        .insert(schema.workflowRuns)
+        .values({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+          triggerType: 'manual',
+          status: 'failed',
+        })
+        .returning();
+      await db.insert(schema.stepRuns).values({
+        id: crypto.randomUUID(),
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        position: 0,
+        status: 'failed',
+      });
+
+      const overview = await service.findOverview(adminActor, created.id);
+
+      expect(overview.recentRuns[0].failedStepKey).toBe('update_activity');
+    });
+
+    it('rejects reading another user project overview with not found', async () => {
+      const created = await service.create(otherAdminActor, validCreateInput);
+
+      await expect(
+        service.findOverview(adminActor, created.id),
+      ).rejects.toThrow(ProjectNotFoundError);
+    });
+
+    it('rejects a nonexistent project', async () => {
+      await expect(
+        service.findOverview(adminActor, crypto.randomUUID()),
+      ).rejects.toThrow(ProjectNotFoundError);
+    });
+
+    it('lets a viewer read their own project overview', async () => {
+      const [seeded] = await db
+        .insert(schema.projects)
+        .values({
+          id: crypto.randomUUID(),
+          ownerId: viewer.id,
+          name: 'Viewer Project',
+          supabaseUrl: 'https://viewer.supabase.co',
+          publishableKey: 'sb_publishable_viewer',
+        })
+        .returning();
+
+      const overview = await service.findOverview(viewerActor, seeded.id);
+
+      expect(overview.id).toBe(seeded.id);
+    });
+  });
+
   describe('delete', () => {
     it('lets an admin delete their own project', async () => {
       const created = await service.create(adminActor, validCreateInput);

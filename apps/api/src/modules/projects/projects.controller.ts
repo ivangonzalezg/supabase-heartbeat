@@ -26,7 +26,10 @@ import { toAuthenticatedActor } from '../../lib/authorization/current-actor';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectsService } from './projects.service';
-import type { ProjectResponse } from './projects.types';
+import type {
+  ProjectOverviewResponse,
+  ProjectResponse,
+} from './projects.types';
 
 @ApiTags('Projects')
 @ApiBearerAuth()
@@ -83,6 +86,33 @@ export class ProjectsController {
     @Param('projectId') projectId: string,
   ): Promise<ProjectResponse> {
     return this.projectsService.findById(
+      toAuthenticatedActor(session),
+      projectId,
+    );
+  }
+
+  @Get(':projectId/overview')
+  @ApiOperation({
+    summary:
+      "Read a project's complete overview: project, aggregate " +
+      'metrics, per-workflow summaries, and recent activity',
+    description:
+      'A single-request payload for the project-overview page: the ' +
+      'project itself, aggregate operational-summary metrics (windowed ' +
+      'to the last 7 days for run counts), a summary row per workflow ' +
+      '(schedule, last/next run, last outcome), and the 10 most recent ' +
+      'runs across every workflow in the project. Both admin and viewer ' +
+      'may call this.',
+  })
+  @ApiOkResponse({ description: "The project's complete overview." })
+  @ApiNotFoundResponse({
+    description: 'The project does not exist or is owned by another user.',
+  })
+  async findOverview(
+    @Session() session: UserSession,
+    @Param('projectId') projectId: string,
+  ): Promise<ProjectOverviewResponse> {
+    return this.projectsService.findOverview(
       toAuthenticatedActor(session),
       projectId,
     );

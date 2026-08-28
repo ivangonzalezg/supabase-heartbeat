@@ -461,6 +461,26 @@ Returning `publishableKey` is intentional — Supabase's publishable (anon)
 key is public by design, unlike a service-role key (never handled by this
 API).
 
+`GET /api/projects/:projectId/overview` (both admin and viewer) returns
+everything a single-page project overview UI needs in one request: the
+same fields as `GET :projectId` plus a `metrics` object, a `workflows`
+array (one summary row per workflow in the project), and a `recentRuns`
+array (the 10 most recently created runs across every workflow in the
+project). Unlike the workflow-overview endpoint's `metrics` (computed
+over a workflow's entire run history), `metrics.totalRuns` and
+`metrics.failedRuns` here are windowed to the last 7 days;
+`metrics.totalWorkflows`/`metrics.activeWorkflows` are plain counts;
+`metrics.lastActivity` is the most recent run's `startedAt` across every
+workflow in the project, unwindowed; `metrics.nextRun` is the earliest
+`nextRun` among the project's enabled workflows. Each `workflows` entry
+carries its own `lastRun`/`lastStatus` (from that workflow's most
+recently created run, if any) and `nextRun` (computed the same way as
+the workflow-overview endpoint's `metrics.nextRun`, via the `cron`
+package, `null` when disabled). Each `recentRuns` entry has the same
+shape as the workflow-overview endpoint's `recentRuns` entries, plus
+`workflowId`/`workflowName`, since this list spans every workflow in the
+project.
+
 ## Workflows API
 
 `/api/projects/:projectId/workflows` (`src/modules/workflows/`) — nested
@@ -1619,6 +1639,7 @@ GET /api/health                          # { status, timestamp, uptime }
 GET    /api/projects                     # List the authenticated actor's own projects
 POST   /api/projects                     # Create a project (admin only)
 GET    /api/projects/:projectId          # Read an owned project
+GET    /api/projects/:projectId/overview # Project + aggregate metrics + per-workflow summaries + last 10 runs across the project
 PATCH  /api/projects/:projectId          # Partially update an owned project (admin only)
 DELETE /api/projects/:projectId          # Delete an owned project (admin only)
 GET    /api/projects/:projectId/workflows                                 # List workflows in an owned project (lightweight, no steps)

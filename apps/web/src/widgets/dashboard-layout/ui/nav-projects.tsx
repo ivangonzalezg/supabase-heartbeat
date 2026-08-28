@@ -38,12 +38,29 @@ function ProjectGroup({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        onClick={() => setExpandedOverride(!expanded)}
-        className="h-auto"
-      >
-        {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
-        <span className="truncate">{project.name}</span>
+      <SidebarMenuButton asChild className="h-auto">
+        <Link to="/projects/$projectId" params={{ projectId: project.id }}>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setExpandedOverride(!expanded)
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return
+              event.preventDefault()
+              event.stopPropagation()
+              setExpandedOverride(!expanded)
+            }}
+            aria-label={expanded ? "Collapse workflows" : "Expand workflows"}
+            className="flex shrink-0 items-center justify-center"
+          >
+            {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+          </span>
+          <span className="truncate">{project.name}</span>
+        </Link>
       </SidebarMenuButton>
       {expanded && workflows.length ? (
         <SidebarMenuSub className="mr-0 pr-0">

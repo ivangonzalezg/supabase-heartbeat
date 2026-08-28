@@ -63,9 +63,7 @@ export class WorkflowSchedulerService
     for (const workflow of enabledWorkflows) {
       this.registerJob(workflow);
     }
-    this.logger.log(
-      `Scheduler enabled: registered ${this.jobs.size} job(s).`,
-    );
+    this.logger.log(`Scheduler enabled: registered ${this.jobs.size} job(s).`);
   }
 
   async onApplicationShutdown(): Promise<void> {

@@ -41,8 +41,7 @@ async function createAndSignIn(
     .expect(200);
 
   const setCookieHeader = response.headers['set-cookie'] as unknown as
-    | string[]
-    | undefined;
+    string[] | undefined;
   if (!setCookieHeader || setCookieHeader.length === 0) {
     throw new Error('Sign-in response did not include a session cookie.');
   }
@@ -135,7 +134,9 @@ describe('Workflow Scheduler (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       enabled: true,
-      steps: [{ stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } }],
+      steps: [
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
+      ],
     });
 
     const scheduler = app.get(WorkflowSchedulerService);
@@ -153,7 +154,9 @@ describe('Workflow Scheduler (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       enabled: true,
-      steps: [{ stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } }],
+      steps: [
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
+      ],
     });
 
     const scheduler = app.get(WorkflowSchedulerService);
@@ -171,7 +174,9 @@ describe('Workflow Scheduler (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       enabled: true,
-      steps: [{ stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } }],
+      steps: [
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
+      ],
     });
 
     const scheduler = app.get(WorkflowSchedulerService);
@@ -197,7 +202,9 @@ describe('Workflow Scheduler (e2e)', () => {
       cronExpression: '0 * * * *',
       timezone: 'UTC',
       enabled: true,
-      steps: [{ stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } }],
+      steps: [
+        { stepKey: 'wait_1', type: 'wait', configuration: { seconds: 1 } },
+      ],
     });
 
     const scheduler = app.get(WorkflowSchedulerService);

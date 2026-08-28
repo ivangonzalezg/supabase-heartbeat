@@ -3,7 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
-import type { ProjectResponse } from './projects.types';
+import type {
+  ProjectOverviewResponse,
+  ProjectResponse,
+} from './projects.types';
 
 function buildSession(role: 'admin' | 'viewer'): UserSession {
   return {
@@ -24,10 +27,25 @@ const sampleProject: ProjectResponse = {
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
 };
 
+const sampleOverview: ProjectOverviewResponse = {
+  ...sampleProject,
+  metrics: {
+    totalWorkflows: 1,
+    activeWorkflows: 1,
+    totalRuns: 2,
+    failedRuns: 0,
+    lastActivity: new Date('2026-01-02T00:00:00.000Z'),
+    nextRun: new Date('2026-01-03T00:00:00.000Z'),
+  },
+  workflows: [],
+  recentRuns: [],
+};
+
 const mockProjectsService = {
   list: jest.fn<ProjectsService['list']>(),
   create: jest.fn<ProjectsService['create']>(),
   findById: jest.fn<ProjectsService['findById']>(),
+  findOverview: jest.fn<ProjectsService['findOverview']>(),
   update: jest.fn<ProjectsService['update']>(),
   delete: jest.fn<ProjectsService['delete']>(),
 };
@@ -88,6 +106,21 @@ describe('ProjectsController', () => {
       'project-1',
     );
     expect(result).toEqual(sampleProject);
+  });
+
+  it('findOverview() delegates to the service with the actor and project ID', async () => {
+    mockProjectsService.findOverview.mockResolvedValue(sampleOverview);
+
+    const result = await controller.findOverview(
+      buildSession('viewer'),
+      'project-1',
+    );
+
+    expect(mockProjectsService.findOverview).toHaveBeenCalledWith(
+      { userId: 'user-1', role: 'viewer' },
+      'project-1',
+    );
+    expect(result).toEqual(sampleOverview);
   });
 
   it('update() delegates to the service with the actor, project ID, and input', async () => {

@@ -215,7 +215,9 @@ describe('WorkflowSchedulerService', () => {
       await service.registerOrReplace(workflow.id);
       expect(service.getRegisteredWorkflowIds()).toEqual([workflow.id]);
 
-      await db.delete(schema.workflows).where(eq(schema.workflows.id, workflow.id));
+      await db
+        .delete(schema.workflows)
+        .where(eq(schema.workflows.id, workflow.id));
       await service.registerOrReplace(workflow.id);
 
       expect(service.getRegisteredWorkflowIds()).toEqual([]);

@@ -2637,10 +2637,7 @@ describe('WorkflowRunsService', () => {
       await createStep(db, workflowA.id, { type: 'wait' });
       registry.register('wait', buildSuccessExecutor('wait', {}));
 
-      const result = await service.executeScheduled(
-        projectA.id,
-        workflowA.id,
-      );
+      const result = await service.executeScheduled(projectA.id, workflowA.id);
 
       expect(result).not.toBeNull();
       expect(result?.triggerType).toBe('scheduled');
@@ -2658,10 +2655,7 @@ describe('WorkflowRunsService', () => {
         .from(schema.workflowRuns)
         .where(eq(schema.workflowRuns.workflowId, workflowA.id));
 
-      const result = await service.executeScheduled(
-        projectA.id,
-        workflowA.id,
-      );
+      const result = await service.executeScheduled(projectA.id, workflowA.id);
 
       const after = await db
         .select()
@@ -2677,10 +2671,7 @@ describe('WorkflowRunsService', () => {
       registry.register('wait', buildSuccessExecutor('wait', {}));
       await createWorkflowRun(db, workflowA.id, { status: 'pending' });
 
-      const result = await service.executeScheduled(
-        projectA.id,
-        workflowA.id,
-      );
+      const result = await service.executeScheduled(projectA.id, workflowA.id);
 
       expect(result).toBeNull();
     });
