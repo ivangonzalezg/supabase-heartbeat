@@ -22,8 +22,8 @@ Currently implemented:
 * A Workflows API (`/api/projects/:projectId/workflows`), nested under
   Projects, with the same ownership model — see "Workflows API" below.
   Workflows are created together with their complete ordered step list in
-  one transactional request; scheduling (cron-triggered execution) is not
-  implemented yet.
+  one transactional request; cron-triggered execution is implemented —
+  see "Scheduler" below.
 * A Workflow Steps API
   (`/api/projects/:projectId/workflows/:workflowId/steps`), nested under
   Workflows, for managing steps after creation, including a complete-order
@@ -45,11 +45,13 @@ Currently implemented:
   8 current MVP step types (`signin`, `signout`, `wait`, `insert`,
   `read`, `update`, `delete`, `invoke_function`) — see "Workflow
   execution foundation" below.
-* A manual workflow-run orchestration engine and endpoint
-  (`POST /api/projects/:projectId/workflows/:workflowId/runs`,
-  `src/modules/workflows/runs/`) — synchronous, admin-only execution of
-  a workflow's enabled steps in order, with `workflow_runs`/`step_runs`
-  persistence — see "Workflow Runs API" below.
+* A workflow-run orchestration engine shared by two triggers:
+  synchronous, admin-only manual execution
+  (`POST /api/projects/:projectId/workflows/:workflowId/runs`) and a
+  real, timer-backed cron scheduler that fires the same orchestration
+  automatically (`src/modules/workflows/runs/`,
+  `src/modules/workflows/scheduler/`), with `workflow_runs`/`step_runs`
+  persistence — see "Workflow Runs API" and "Scheduler" below.
 * Workflow-step output references
   (`${steps.<step_key>.output.<path>}`, `src/modules/workflows/references/`)
   — a step's configuration may reference an earlier, enabled step's
@@ -64,8 +66,9 @@ Currently implemented:
 
 **Planned / not yet implemented:**
 
-* Scheduler integration and cron-triggered execution.
-* Workflow-run overlap prevention, retries, cancellation, and timeouts.
+* Retries, cancellation, and timeouts for a running workflow. Overlap
+  prevention (`overlapPolicy: 'skip'`) is implemented for scheduled
+  triggers — see "Scheduler" below.
 * Partial string interpolation (a reference embedded inside a larger
   string) and expressions/arithmetic/fallback values built on top of
   output references — only whole-value references are implemented.
@@ -90,9 +93,8 @@ Currently implemented:
 * `@nestjs/swagger` + `@scalar/express-api-reference` + `@scalar/api-reference` (merged `/api/docs` page, see "API documentation").
 * Better Auth + `@thallesp/nestjs-better-auth`.
 * `class-validator` + `class-transformer` (request DTO validation; see "Projects API").
-* `cron` (validates workflow cron expressions using the same parser
-  `@nestjs/schedule` will use once scheduling is implemented — see
-  "Workflows API").
+* `cron` (validates workflow cron expressions, computes `nextRun` for
+  display, and powers the real scheduler — see "Scheduler" below).
 * `dotenv` (loads `apps/api/.env` at startup).
 * Jest (unit and e2e tests).
 
@@ -173,6 +175,7 @@ that is already set.
 | `FIRST_ADMIN_EMAIL` | No, but required together with `FIRST_ADMIN_PASSWORD` | none | `admin@example.com` | Bootstraps the first administrator at startup. See "First-administrator bootstrap" below. |
 | `FIRST_ADMIN_PASSWORD` | No, but required together with `FIRST_ADMIN_EMAIL` | none | a strong initial password | Bootstrap secret — see "First-administrator bootstrap" below for secret-management guidance. |
 | `FIRST_ADMIN_NAME` | No | `Admin` | `Admin` | Display name for the bootstrapped administrator. Alone (without the two variables above), it has no effect. |
+| `SCHEDULER_ENABLED` | No | `false` | `true` | Enables the real cron scheduler — see "Scheduler" below. Accepts `1`/`true`/`yes`/`on` (case-insensitive) as truthy; anything else (including unset) is disabled. |
 
 `DATABASE_PATH` resolution: the API never derives this path from the
 compiled file's own location — it resolves purely against
@@ -845,11 +848,11 @@ complete-list requirement.
 `src/modules/workflow-execution/` (`WorkflowExecutionModule`) is the
 internal architecture for executing workflow steps: the `StepExecutor`
 contract, the executor registry, and the per-run execution context.
-Actual run orchestration (creating `workflow_runs`/`step_runs`, the
-manual-run HTTP endpoint) lives in `src/modules/workflows/runs/` and is
-documented below in "Workflow Runs API". There is still no scheduler
-integration and no cron-triggered execution — only manual execution via
-that endpoint exists today.
+Actual run orchestration (creating `workflow_runs`/`step_runs`) lives in
+`src/modules/workflows/runs/` and is documented below in "Workflow Runs
+API". Two triggers drive it today: the manual-run HTTP endpoint, and the
+real cron scheduler in `src/modules/workflows/scheduler/` — see
+"Scheduler" below.
 
 **One Supabase client per workflow run.** `WorkflowRunsService` calls
 `WorkflowExecutionContextFactory.create({ projectId, workflowId,
@@ -1025,11 +1028,13 @@ headers, or authentication material in a persisted or returned message.
 ## Workflow Runs API
 
 `POST /api/projects/:projectId/workflows/:workflowId/runs`
-(`src/modules/workflows/runs/`, admin only) is the only way to execute a
-workflow: a synchronous, manually triggered run. There is no scheduler,
-no cron-triggered execution, no background worker, and no queue — the
-HTTP request itself performs the run and the connection stays open until
-it finishes. The response is `201 Created` whenever a run record was
+(`src/modules/workflows/runs/`, admin only) is the only way to *manually*
+execute a workflow: a synchronous, HTTP-triggered run. There is no
+background worker or queue for this endpoint specifically — the HTTP
+request itself performs the run and the connection stays open until it
+finishes. (A workflow can also run automatically on its schedule — see
+"Scheduler" below, which reuses the same orchestration via
+`triggerType: 'scheduled'`.) The response is `201 Created` whenever a run record was
 successfully created and completed its execution attempt, **regardless
 of whether the run itself ended in `success` or `failed`** — check
 `body.status`, not the HTTP status code, to know whether the workflow
@@ -1052,10 +1057,12 @@ averages `finishedAt - startedAt` only over runs where both timestamps
 are set; `null` if none qualify. `metrics.lastRun` is the most recent
 run's `startedAt`, `null` if the workflow has never run.
 `metrics.nextRun` is the next cron occurrence, computed on the fly from
-`cronExpression`/`timezone` via the `cron` package (used purely as a
-date-math utility here — the `CronJob` it constructs is never started,
-so this introduces no scheduler); it is always `null` when the workflow
-is disabled, since scheduling does not apply to a disabled workflow.
+`cronExpression`/`timezone` via the `cron` package, used purely as a
+date-math utility here (this particular `CronJob` is never started —
+distinct from the real, started `CronJob` instances the scheduler
+maintains per workflow, see "Scheduler" below); it is always `null` when
+the workflow is disabled, since scheduling does not apply to a disabled
+workflow.
 `recentRuns` holds the 10 most recently created runs, most recent first;
 each entry's `failedStepKey` is the `stepKey` of the step that failed
 (resolved via `workflow_steps`), `null` for a non-failed run or a failed
@@ -1083,8 +1090,9 @@ actor.userId AND workflows.id = :workflowId AND workflows.project_id =
 is wrong.
 
 **Disabled workflows can still be run manually.** `workflows.enabled`
-only controls future scheduled execution (not yet implemented); it has
-no effect on this endpoint. **Only enabled steps execute.** Disabled
+controls scheduled execution (see "Scheduler" below); it has no effect
+on this endpoint — an admin can always trigger a manual run regardless
+of `enabled`. **Only enabled steps execute.** Disabled
 steps are skipped entirely: no `step_run` row is created for them, they
 never cause a failure, and they do not affect the relative execution
 order of the steps around them. A workflow with zero enabled steps
@@ -1135,13 +1143,13 @@ into two trigger-agnostic private methods: `prepareRun` (resolves the
 project/workflow/ordered-steps hierarchy — optionally proving actor
 ownership — and inserts the initial `workflow_runs` row for a given
 `triggerType`) and `runSteps` (runs the enabled steps, persists
-`step_runs` rows, and finalizes the run). `executeManual` is a thin
-wrapper that adds the admin-role check and calls both with
-`triggerType: 'manual'`. This split exists so that a future
-scheduled-trigger entry point (not implemented — see "Workflow
-execution foundation" above) can call `prepareRun`/`runSteps` directly
-with `actor: null` and `triggerType: 'scheduled'`, reusing the exact
-same orchestration instead of duplicating it in a separate module.
+`step_runs` rows, and finalizes the run). Two thin public wrappers call
+both: `executeManual` adds the admin-role check and passes `actor`/
+`triggerType: 'manual'`; `executeScheduled` (called by
+`WorkflowSchedulerService` — see "Scheduler" below) adds overlap-policy
+enforcement and passes `actor: null`/`triggerType: 'scheduled'`. Neither
+duplicates the orchestration — both reuse the exact same
+`prepareRun`/`runSteps` pair.
 
 **Transaction boundaries.** Only the run-creation phase — ownership
 verification, loading the project/workflow/ordered steps, and inserting
@@ -1311,20 +1319,105 @@ in-progress sequence or configuration.
 
 **Not implemented**: partial string interpolation, expressions,
 arithmetic, fallback/default values, optional references, reference
-aliases, cross-workflow references, references to a previous run,
-references to project/environment variables, and (per "Not implemented
-by this endpoint" below) any scheduler-driven use of references. Output
-references are intended primarily for cleanup flows within one run
-(create → act → delete), not as a general data-passing mechanism.
+aliases, cross-workflow references, and references to a previous run or
+to project/environment variables. Output references are intended
+primarily for cleanup flows within one run (create → act → delete), not
+as a general data-passing mechanism. Reference resolution works
+identically for a scheduled run (`executeScheduled`) as for a manual one
+— both call the same `runSteps`.
 
 **Not implemented by this endpoint**: overlap prevention (nothing stops
-two concurrent manual runs of the same workflow), distributed locks,
-automatic retries, cancellation, timeouts, and preflight/dry-run
+two concurrent *manual* runs of the same workflow — only a *scheduled*
+trigger checks for an active run, see "Scheduler" below), distributed
+locks, automatic retries, cancellation, timeouts, and preflight/dry-run
 validation of remote execution outcomes. The response body of the
 `POST` call is the only way to see one run's full detail (including its
 step-by-step `stepRuns`) — `GET :workflowId/overview` (below) covers
 only a fixed last-10 summary view (aggregate metrics plus a bounded run
 list), not arbitrary pagination or a single-run detail-by-ID lookup.
+
+## Scheduler
+
+`src/modules/workflows/scheduler/` (`WorkflowSchedulerService`, a
+provider inside `WorkflowsModule`, not a separate module) keeps one
+real, timer-backed `CronJob` (from the `cron` package) per workflow with
+`enabled: true`, firing scheduled runs through
+`WorkflowRunsService.executeScheduled` — the same orchestration manual
+execution uses, with `triggerType: 'scheduled'` instead of `'manual'`.
+
+**Opt-in via `SCHEDULER_ENABLED`** (see "Environment variables"):
+disabled by default. When disabled, `WorkflowSchedulerService` registers
+nothing at startup and every one of its public methods is a no-op —
+manual execution is completely unaffected either way.
+
+**Registration lifecycle.** At `onApplicationBootstrap`, every
+`enabled: true` workflow row gets a `CronJob` built from its
+`cronExpression`/`timezone` and started immediately. After that, the
+registry is kept in sync only by `WorkflowsService` calling
+`registerOrReplace(workflowId)` after every successful create/update/
+replace, and `unregister(workflowId)` after every successful delete —
+`registerOrReplace` always re-reads the row itself (never trusts a
+caller-passed snapshot) and registers, replaces, or removes the job
+based on the row's current `enabled` value, so toggling `enabled`
+through `PATCH`, changing `cronExpression`/`timezone`, or deleting a
+workflow all converge to the correct registered/unregistered state
+through this same entry point. There is no periodic re-sync: if the
+registry and the database ever disagree (e.g. a row edited directly,
+bypassing the API), the discrepancy persists until the next mutation
+through `WorkflowsService` or the next process restart. On
+`onApplicationShutdown`, every registered job is stopped and the
+registry is cleared.
+
+**Overlap policy.** `executeScheduled` enforces `overlapPolicy: 'skip'`
+(the only value in the closed set today, but the check is gated on
+`overlapPolicy === 'skip'` rather than unconditional, so it stays
+forward-compatible if more policies are added later): immediately before
+`prepareRun`, it checks for an existing `pending`/`running`
+`workflow_runs` row for the workflow; if one exists, the scheduled
+trigger is skipped entirely — no new `workflow_runs` row is created, and
+`executeScheduled` returns `null`. This check is a plain `SELECT`, not
+itself locked, so there is a small, accepted TOCTOU gap: the only
+realistic race (a single cron expression cannot fire the same job twice
+at once) is a scheduled tick overlapping a concurrent *manual* run of
+the same workflow started moments earlier. This is a documented
+limitation, not solved with distributed locking here, matching the
+existing best-effort-retry precedent in `finalizeWorkflowRun`.
+
+**Error isolation.** A tick that fails is logged via Nest's `Logger` and
+never affects other workflows' jobs or the scheduler's own lifecycle.
+Two layers guard this: `handleTick` (the actual tick handler, a
+directly callable method rather than an inline closure, so it can be
+tested without waiting for a real cron fire) wraps its own body in a
+try/catch; `CronJob`'s own `errorHandler` option is also set as a
+backstop for anything `cron` itself would otherwise consider unhandled.
+`waitForCompletion: true` is set on every job so at most one execution
+of a given workflow's job is ever in flight at a time, consistent with
+the overlap-policy enforcement above.
+
+**Per-tick logging.** Every real fire of a registered `CronJob` logs
+`Scheduled tick fired for workflow <id>.` from `handleTick`, and once
+`executeScheduled` returns, a second line logs the outcome:
+`Scheduled run <runId> for workflow <id> finished with status
+"<status>".` for a run that was actually created (`success` or
+`failed`), or nothing further when the trigger was skipped by the
+overlap check — that case already logs its own line from
+`executeScheduled` (`Skipping scheduled run for workflow <id>: run
+<runId> is still active.`, see above), so it is not duplicated here.
+Registration/deregistration itself is unlogged per-event (only the
+bootstrap summary — `Scheduler enabled: registered N job(s).` — is
+logged); an unexpected error before a run could even be attempted (e.g.
+a DB error while re-reading the workflow row) logs via the "Error
+isolation" path above instead of a tick-result line.
+
+**Visibility.** A scheduled run is persisted and returned identically to
+a manual run everywhere in the Workflow Runs API — `GET
+:workflowId/overview`'s `recentRuns`, `GET .../runs/:runId` — the only
+difference is `triggerType: 'scheduled'` instead of `'manual'`.
+
+**Timezone/DST.** `timeZone` is passed straight through to `CronJob`
+(Luxon-backed internally), the same way `metrics.nextRun`'s date-math
+`CronJob` already does — DST transitions are handled by `cron`/Luxon,
+not by any code in this codebase.
 
 ## Shared validation package
 

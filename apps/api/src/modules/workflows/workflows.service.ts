@@ -26,12 +26,14 @@ import type {
 import type { WorkflowStepResponse } from './steps/workflow-steps.types';
 import { validateWorkflowReferences } from './references/validate-workflow-references';
 import { WorkflowRunsService } from './runs/workflow-runs.service';
+import { WorkflowSchedulerService } from './scheduler/workflow-scheduler.service';
 
 @Injectable()
 export class WorkflowsService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly workflowRunsService: WorkflowRunsService,
+    private readonly workflowSchedulerService: WorkflowSchedulerService,
   ) {}
 
   private get db() {
@@ -92,7 +94,7 @@ export class WorkflowsService {
       })),
     );
 
-    return this.db.transaction((tx) => {
+    const result = this.db.transaction((tx) => {
       const [workflowRow] = tx
         .insert(workflows)
         .values({
@@ -132,6 +134,10 @@ export class WorkflowsService {
         steps: stepRows.map(toWorkflowStepResponse),
       };
     });
+
+    await this.workflowSchedulerService.registerOrReplace(result.id);
+
+    return result;
   }
 
   async findById(
@@ -252,6 +258,8 @@ export class WorkflowsService {
       throw new WorkflowNotFoundError();
     }
 
+    await this.workflowSchedulerService.registerOrReplace(row.id);
+
     return toWorkflowResponse(row);
   }
 
@@ -326,7 +334,7 @@ export class WorkflowsService {
       .filter((step) => !submittedIds.has(step.id))
       .map((step) => step.id);
 
-    return this.db.transaction((tx) => {
+    const result = this.db.transaction((tx) => {
       const [updatedWorkflowRow] = tx
         .update(workflows)
         .set({
@@ -414,6 +422,10 @@ export class WorkflowsService {
         steps: stepRows.map(toWorkflowStepResponse),
       };
     });
+
+    await this.workflowSchedulerService.registerOrReplace(result.id);
+
+    return result;
   }
 
   async delete(
@@ -431,6 +443,8 @@ export class WorkflowsService {
     if (deletedRows.length === 0) {
       throw new WorkflowNotFoundError();
     }
+
+    this.workflowSchedulerService.unregister(workflowId);
   }
 
   /**

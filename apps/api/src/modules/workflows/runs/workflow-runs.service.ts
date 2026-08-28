@@ -66,12 +66,12 @@ const RECENT_RUNS_LIMIT = 10;
  *   attempted step, stops on the first failure, and finalizes the
  *   `workflow_runs` row.
  *
- * `executeManual` is the only current caller: a thin wrapper that adds
- * the actor/role check and passes `triggerType: 'manual'`. No scheduler
- * exists yet — this split exists purely so that when one is added, it
- * can call `prepareRun`/`runSteps` directly (with `actor: null` and
- * `triggerType: 'scheduled'`) instead of reimplementing this orchestration
- * in a separate module.
+ * `executeManual` and `executeScheduled` are the two thin wrappers built
+ * on top: `executeManual` adds the actor/role check and passes
+ * `triggerType: 'manual'`; `executeScheduled` (called by
+ * `WorkflowSchedulerService`) adds overlap-policy enforcement and passes
+ * `actor: null`/`triggerType: 'scheduled'`. Neither reimplements the
+ * orchestration — both call the same `prepareRun`/`runSteps` pair.
  *
  * Also serves read-only operational-summary metrics and the bounded
  * recent-runs list (`getSummaryMetrics`), used by
@@ -117,6 +117,79 @@ export class WorkflowRunsService {
 
     const { project, workflow, orderedSteps, workflowRunId, startedAt } =
       this.prepareRun(projectId, workflowId, actor, 'manual');
+
+    const context = this.contextFactory.create({
+      projectId: project.id,
+      workflowId: workflow.id,
+      supabaseUrl: project.supabaseUrl,
+      publishableKey: project.publishableKey,
+    });
+
+    const enabledSteps = orderedSteps.filter((step) => step.enabled);
+
+    return this.runSteps(context, workflowRunId, startedAt, enabledSteps);
+  }
+
+  /**
+   * Entry point for the scheduler (`WorkflowSchedulerService`). No HTTP
+   * actor exists for a scheduled trigger, so `prepareRun` is called with
+   * `actor: null` (resolves project/workflow by id alone, no ownership
+   * check — the scheduler only ever calls this for a workflow row it
+   * already loaded directly from the database).
+   *
+   * Enforces `overlapPolicy: 'skip'`: if the workflow already has a
+   * `pending` or `running` run, this scheduled trigger is skipped
+   * entirely — no new `workflow_runs` row is created, and `null` is
+   * returned instead of a `WorkflowRunDetailResponse`. The check is
+   * gated on `workflow.overlapPolicy === 'skip'` (not unconditional) so
+   * it stays forward-compatible if more policies are added later, even
+   * though `'skip'` is the only value in the closed set today.
+   *
+   * Race note: the overlap check is a plain `SELECT` immediately before
+   * `prepareRun`'s transaction, not itself locked. A single cron
+   * expression cannot fire the same job twice at the same instant, so
+   * the only realistic race is a scheduled tick overlapping a
+   * concurrent *manual* run of the same workflow started moments
+   * earlier — this leaves a small, accepted TOCTOU gap (both checks can
+   * pass before either insert commits), documented rather than solved
+   * with distributed locking here, matching the existing
+   * best-effort-retry precedent in `finalizeWorkflowRun`.
+   */
+  async executeScheduled(
+    projectId: string,
+    workflowId: string,
+  ): Promise<WorkflowRunDetailResponse | null> {
+    const [workflowRow] = await this.db
+      .select({ overlapPolicy: workflows.overlapPolicy })
+      .from(workflows)
+      .where(
+        and(eq(workflows.id, workflowId), eq(workflows.projectId, projectId)),
+      );
+    if (!workflowRow) {
+      throw new WorkflowNotFoundError();
+    }
+
+    if (workflowRow.overlapPolicy === 'skip') {
+      const [activeRun] = await this.db
+        .select({ id: workflowRuns.id })
+        .from(workflowRuns)
+        .where(
+          and(
+            eq(workflowRuns.workflowId, workflowId),
+            inArray(workflowRuns.status, ['pending', 'running']),
+          ),
+        )
+        .limit(1);
+      if (activeRun) {
+        this.logger.log(
+          `Skipping scheduled run for workflow ${workflowId}: run ${activeRun.id} is still active.`,
+        );
+        return null;
+      }
+    }
+
+    const { project, workflow, orderedSteps, workflowRunId, startedAt } =
+      this.prepareRun(projectId, workflowId, null, 'scheduled');
 
     const context = this.contextFactory.create({
       projectId: project.id,

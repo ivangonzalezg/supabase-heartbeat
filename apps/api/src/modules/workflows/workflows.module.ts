@@ -7,6 +7,7 @@ import { WorkflowStepsController } from './steps/workflow-steps.controller';
 import { WorkflowStepsService } from './steps/workflow-steps.service';
 import { WorkflowRunsController } from './runs/workflow-runs.controller';
 import { WorkflowRunsService } from './runs/workflow-runs.service';
+import { WorkflowSchedulerService } from './scheduler/workflow-scheduler.service';
 
 @Module({
   imports: [DatabaseModule, WorkflowExecutionModule],
@@ -15,7 +16,12 @@ import { WorkflowRunsService } from './runs/workflow-runs.service';
     WorkflowStepsController,
     WorkflowRunsController,
   ],
-  providers: [WorkflowsService, WorkflowStepsService, WorkflowRunsService],
+  providers: [
+    WorkflowsService,
+    WorkflowStepsService,
+    WorkflowRunsService,
+    WorkflowSchedulerService,
+  ],
   exports: [WorkflowRunsService],
 })
 export class WorkflowsModule {}

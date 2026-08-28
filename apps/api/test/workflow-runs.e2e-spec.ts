@@ -817,7 +817,7 @@ describe('Workflow Runs API (e2e)', () => {
     expect(document.paths[path].post).toBeDefined();
   });
 
-  it('adds no scheduler route or behavior', async () => {
+  it('exposes no scheduler HTTP route (scheduling is an internal service, not an endpoint)', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/openapi.json')
       .expect(200);

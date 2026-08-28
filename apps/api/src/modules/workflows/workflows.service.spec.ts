@@ -98,6 +98,7 @@ describe('WorkflowsService', () => {
     service = new WorkflowsService(
       { db } as never,
       new WorkflowRunsService({ db } as never, {} as never, {} as never),
+      { registerOrReplace: async () => {}, unregister: () => {} } as never,
     );
 
     adminA = await createUser(db, 'admin');

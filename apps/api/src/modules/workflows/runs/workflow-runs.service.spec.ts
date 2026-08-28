@@ -2631,4 +2631,98 @@ describe('WorkflowRunsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('executeScheduled', () => {
+    it('creates a scheduled run and reuses runSteps, same as executeManual', async () => {
+      await createStep(db, workflowA.id, { type: 'wait' });
+      registry.register('wait', buildSuccessExecutor('wait', {}));
+
+      const result = await service.executeScheduled(
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result).not.toBeNull();
+      expect(result?.triggerType).toBe('scheduled');
+      expect(result?.status).toBe('success');
+      expect(result?.stepRuns).toHaveLength(1);
+    });
+
+    it('returns null and creates no new run when an active run already exists', async () => {
+      await createStep(db, workflowA.id, { type: 'wait' });
+      registry.register('wait', buildSuccessExecutor('wait', {}));
+      await createWorkflowRun(db, workflowA.id, { status: 'running' });
+
+      const before = await db
+        .select()
+        .from(schema.workflowRuns)
+        .where(eq(schema.workflowRuns.workflowId, workflowA.id));
+
+      const result = await service.executeScheduled(
+        projectA.id,
+        workflowA.id,
+      );
+
+      const after = await db
+        .select()
+        .from(schema.workflowRuns)
+        .where(eq(schema.workflowRuns.workflowId, workflowA.id));
+
+      expect(result).toBeNull();
+      expect(after).toHaveLength(before.length);
+    });
+
+    it('skips for an existing pending run too, not just running', async () => {
+      await createStep(db, workflowA.id, { type: 'wait' });
+      registry.register('wait', buildSuccessExecutor('wait', {}));
+      await createWorkflowRun(db, workflowA.id, { status: 'pending' });
+
+      const result = await service.executeScheduled(
+        projectA.id,
+        workflowA.id,
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it.each(['success', 'failed', 'cancelled', 'skipped'] as const)(
+      'does not skip when the only existing run has status %s',
+      async (status) => {
+        await createStep(db, workflowA.id, { type: 'wait' });
+        registry.register('wait', buildSuccessExecutor('wait', {}));
+        await createWorkflowRun(db, workflowA.id, { status });
+
+        const result = await service.executeScheduled(
+          projectA.id,
+          workflowA.id,
+        );
+
+        expect(result).not.toBeNull();
+      },
+    );
+
+    it('throws WorkflowNotFoundError for a nonexistent workflow', async () => {
+      await expect(
+        service.executeScheduled(projectA.id, 'nonexistent-workflow-id'),
+      ).rejects.toThrow(WorkflowNotFoundError);
+    });
+
+    it('throws WorkflowNotFoundError when the workflow belongs to a different project', async () => {
+      await expect(
+        service.executeScheduled(projectB.id, workflowA.id),
+      ).rejects.toThrow(WorkflowNotFoundError);
+    });
+
+    it('performs no ownership/actor check, unlike executeManual', async () => {
+      await createStep(db, workflowA.id, { type: 'wait' });
+      registry.register('wait', buildSuccessExecutor('wait', {}));
+
+      // projectA is owned by adminA, not adminB — executeManual with
+      // adminBActor would 404. executeScheduled takes no actor at all
+      // and only needs the projectId/workflowId pair to be consistent.
+      await expect(
+        service.executeScheduled(projectA.id, workflowA.id),
+      ).resolves.not.toBeNull();
+    });
+  });
 });
