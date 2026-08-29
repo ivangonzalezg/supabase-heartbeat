@@ -136,8 +136,16 @@ export function ProjectHeader({
               New workflow
             </Link>
           </Button>
-          <Button type="button" variant="outline" className="bg-card" disabled>
-            Edit project
+          <Button
+            type="button"
+            variant="outline"
+            className="bg-card"
+            disabled={!hasData}
+            asChild
+          >
+            <Link to="/projects/$projectId/edit" params={{ projectId }}>
+              Edit project
+            </Link>
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>

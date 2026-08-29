@@ -4,11 +4,11 @@ React frontend for Supabase Heartbeat.
 
 ## Responsibilities
 
-Two routes exist today: `/sign-in` (public) and `/` (protected overview,
-showing the signed-in user's projects/workflows). Routing is handled by
-TanStack Router with a single centralized auth guard — see "Routing
-(TanStack Router)" below. There is no dashboard or scheduler UI yet —
-those are planned, not implemented.
+The protected dashboard includes the overview, project create/edit/overview,
+and workflow create/edit/overview routes; `/sign-in` is public. Routing is
+handled by TanStack Router with a single centralized auth guard — see
+"Routing (TanStack Router)" below. There is no scheduler UI yet — that is
+planned, not implemented.
 
 A cross-project summary of the authenticated user's projects and workflows
 (the full field set, minus each workflow's `steps`) is fetched and cached
@@ -248,6 +248,12 @@ with the official `@feature-sliced/steiger-plugin`, `recommended` preset
 * `routes/sign-in-route.tsx` — `/sign-in`, nested directly under
   `rootRoute` (outside the dashboard layout — no sidebar on the sign-in
   screen).
+* `routes/create-project-route.tsx` — `/projects/new`, renders
+  `pages/create-project`.
+* `routes/project-overview-route.tsx` — `/projects/$projectId`, renders
+  `pages/project-overview`.
+* `routes/edit-project-route.tsx` — `/projects/$projectId/edit`, renders
+  `pages/edit-project` and pre-fills the editable project details.
 * `routes/create-workflow-route.tsx` — `/projects/$projectId/workflows/new`,
   renders `pages/create-workflow`.
 * `routes/workflow-overview-route.tsx` —
@@ -256,11 +262,9 @@ with the official `@feature-sliced/steiger-plugin`, `recommended` preset
 * `routes/edit-workflow-route.tsx` —
   `/projects/$projectId/workflows/$workflowId/edit`, renders
   `pages/edit-workflow`.
-* `router.tsx` — builds the route tree: `rootRoute.addChildren([
-  dashboardLayoutRoute.addChildren([indexRoute, createProjectRoute,
-  createWorkflowRoute, workflowOverviewRoute, editWorkflowRoute]),
-  signInRoute ])` and the `router` instance; also declares the TanStack
-  Router module augmentation
+* `router.tsx` — builds the route tree: `rootRoute.addChildren([...])`,
+  registering the dashboard routes above and `signInRoute`; it also declares
+  the TanStack Router module augmentation
   (`declare module "@tanstack/react-router" { interface Register { router:
   typeof router } }`) for type-safe navigation.
 * `index.ts` — public API, exports `router`.

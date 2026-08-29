@@ -46,10 +46,16 @@ async function renderWithRouter(
     path: "/projects/$projectId/workflows/new",
     component: () => <div>Create workflow page</div>,
   })
+  const editProjectStub = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/projects/$projectId/edit",
+    component: () => <div>Edit project page</div>,
+  })
   const routeTree = rootRoute.addChildren([
     indexStub,
     overviewStub,
     newWorkflowStub,
+    editProjectStub,
   ])
   const router = createRouter({
     routeTree,
@@ -90,6 +96,20 @@ describe("ProjectHeader", () => {
     expect(
       screen.getByRole("heading", { name: "Artemivo" })
     ).toBeInTheDocument()
+  })
+
+  it("links the Edit project button to this project's edit route", async () => {
+    await renderWithRouter({
+      projectId: "project-1",
+      projectName: "Artemivo",
+      description: null,
+      enabled: true,
+    })
+
+    expect(screen.getByRole("link", { name: /edit project/i })).toHaveAttribute(
+      "href",
+      "/projects/project-1/edit"
+    )
   })
 
   it("shows the description when provided", async () => {
