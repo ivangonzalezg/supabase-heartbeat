@@ -150,8 +150,71 @@ This builds, in order:
 2. `apps/api/dist` — the compiled NestJS application.
 
 In production, NestJS serves the compiled frontend directly (static assets
-plus an SPA fallback to `index.html`) instead of proxying to Vite. Docker
-packaging is not part of this repository yet.
+plus an SPA fallback to `index.html`) instead of proxying to Vite. See
+"Docker" below for how this same build is packaged into a single container.
+
+## Docker
+
+The repository root [Dockerfile](Dockerfile) builds a single image that
+serves both the API and the compiled frontend behind one port — the web app
+is never run as a dev-time process inside the container; it is built to
+static files (`apps/web/dist`) and served by NestJS, exactly as in a normal
+production build (see "Production build" above).
+
+```bash
+cp .env.example .env   # fill in BETTER_AUTH_SECRET at minimum
+docker compose up --build
+```
+
+This starts one service (`app`) listening on `http://localhost:3000` (or
+whatever host `PORT` you set in `.env`; the container always listens on
+`3000` internally). All of the API's environment variables (see
+[apps/api/.env.example](apps/api/.env.example) and
+[apps/api/README.md#environment-variables](apps/api/README.md#environment-variables))
+are configurable through the root `.env` file / `docker-compose.yml`'s
+`environment:` block — `BETTER_AUTH_SECRET` is required and compose refuses
+to start without it. The frontend has no environment variables of its own
+(see "Environment" above), so there is nothing to configure for it beyond
+the image build itself.
+
+The SQLite database file persists in the named volume `heartbeat-data`,
+mounted at `/repo/apps/api/data` (matching `DATABASE_PATH`'s default,
+`./data/supabase-heartbeat.db`, resolved against the container's working
+directory `/repo/apps/api`).
+
+**Applying database migrations**: the runtime image intentionally does not
+include `drizzle-kit` or TypeScript source (production `node_modules` and
+compiled output only, per "Repository integrity" in
+[AGENTS.md](AGENTS.md)). Run migrations against the running container's
+volume using the build stage instead, from the repository root:
+
+```bash
+docker compose run --rm \
+  -e DATABASE_PATH=/repo/apps/api/data/supabase-heartbeat.db \
+  --entrypoint sh \
+  --build-target build \
+  app -c "yarn workspace @supabase-heartbeat/api db:migrate"
+```
+
+Multi-stage build:
+
+1. `deps` — installs every workspace's dependencies (`yarn install
+   --immutable`), including the C++ toolchain `better-sqlite3` needs to
+   compile its native addon.
+2. `build` — runs the same three build steps as the root `yarn build`
+   script: `packages/validation`, then `apps/web`, then `apps/api`.
+3. `runtime` — a fresh image with only production dependencies
+   (`yarn workspaces focus @supabase-heartbeat/api --production`) plus the
+   compiled `apps/api/dist`, `apps/web/dist`, and `apps/api/drizzle`
+   directories copied in. `apps/api` and `apps/web` are kept as sibling
+   directories inside the image because
+   `apps/api/src/frontend/frontend-build-path.ts` resolves the frontend's
+   build output relative to the API process's working directory
+   (`resolve('..', 'web', 'dist')`).
+
+The base image is `node:24-trixie-slim`, not `node:24-bookworm-slim`:
+`better-sqlite3`'s prebuilt native addon requires `GLIBC_2.38`, which
+Debian 12 (bookworm)'s glibc does not provide; Debian 13 (trixie) does.
 
 ## Environment
 
