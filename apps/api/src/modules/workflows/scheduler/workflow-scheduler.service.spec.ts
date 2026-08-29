@@ -70,19 +70,22 @@ async function createWorkflow(
   return workflow;
 }
 
-function buildFakeWorkflowRunsService(): WorkflowRunsService & {
+function buildFakeWorkflowRunsService(): {
   executeScheduled: jest.Mock;
 } {
   return {
     executeScheduled: jest.fn(() => Promise.resolve(null)),
-  } as unknown as WorkflowRunsService & { executeScheduled: jest.Mock };
+  };
 }
 
 function buildService(
   db: AppDatabase,
-  workflowRunsService: WorkflowRunsService,
+  workflowRunsService: ReturnType<typeof buildFakeWorkflowRunsService>,
 ): WorkflowSchedulerService {
-  return new WorkflowSchedulerService({ db } as never, workflowRunsService);
+  return new WorkflowSchedulerService(
+    { db } as never,
+    workflowRunsService as unknown as WorkflowRunsService,
+  );
 }
 
 describe('WorkflowSchedulerService', () => {

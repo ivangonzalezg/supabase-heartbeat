@@ -67,7 +67,10 @@ export function OverviewProjectsTable({
                 className="h-auto p-0 text-primary"
                 asChild
               >
-                <Link to="/projects/$projectId" params={{ projectId: project.id }}>
+                <Link
+                  to="/projects/$projectId"
+                  params={{ projectId: project.id }}
+                >
                   View project
                 </Link>
               </Button>

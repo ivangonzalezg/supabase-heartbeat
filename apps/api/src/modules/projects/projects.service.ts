@@ -366,9 +366,7 @@ export class ProjectsService {
     }
 
     if (input.enabled !== undefined) {
-      await this.workflowSchedulerService.registerOrReplaceForProject(
-        row.id,
-      );
+      await this.workflowSchedulerService.registerOrReplaceForProject(row.id);
     }
 
     return toProjectResponse(row);
@@ -376,6 +374,11 @@ export class ProjectsService {
 
   async delete(actor: AuthenticatedActor, projectId: string): Promise<void> {
     this.assertCanMutate(actor);
+
+    const projectWorkflows = await this.db
+      .select({ id: workflows.id })
+      .from(workflows)
+      .where(eq(workflows.projectId, projectId));
 
     const deletedRows = await this.db
       .delete(projects)
@@ -386,6 +389,15 @@ export class ProjectsService {
 
     if (deletedRows.length === 0) {
       throw new ProjectNotFoundError();
+    }
+
+    // The DB cascade-deletes the project's workflows, but the scheduler's
+    // in-memory CronJob registry isn't tied to the DB and won't notice on
+    // its own until each job's next tick. Unregister them here so deleting
+    // a project cancels its crons immediately instead of leaving zombie
+    // jobs around until the scheduler's handleTick backstop cleans them up.
+    for (const workflow of projectWorkflows) {
+      this.workflowSchedulerService.unregister(workflow.id);
     }
   }
 

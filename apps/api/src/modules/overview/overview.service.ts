@@ -132,8 +132,7 @@ export class OverviewService {
           name: project.name,
           enabled: project.enabled,
           totalWorkflows: projectWorkflows.length,
-          activeWorkflows: projectWorkflows.filter((row) => row.enabled)
-            .length,
+          activeWorkflows: projectWorkflows.filter((row) => row.enabled).length,
           lastActivity: lastActivityByProjectId.get(project.id) ?? null,
           nextRun: projectUpcoming[0]?.nextRun ?? null,
         };

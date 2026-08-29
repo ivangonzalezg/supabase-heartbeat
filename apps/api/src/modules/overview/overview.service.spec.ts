@@ -357,7 +357,7 @@ describe('OverviewService', () => {
     expect(result.upcomingRuns).toHaveLength(10);
   });
 
-  it("sets metrics.nextRun/nextRunWorkflowName/nextRunProjectName from the earliest upcoming run", async () => {
+  it('sets metrics.nextRun/nextRunWorkflowName/nextRunProjectName from the earliest upcoming run', async () => {
     const project = await createProject(db, owner.id, { name: 'Production' });
     const workflow = await createWorkflow(db, project.id, {
       name: 'Database Keepalive',

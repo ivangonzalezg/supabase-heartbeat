@@ -65,7 +65,8 @@ export function OverviewPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Overview</h1>
           <p className="text-sm text-muted-foreground">
-            Monitor your projects, workflows, and recent activity from one place.
+            Monitor your projects, workflows, and recent activity from one
+            place.
           </p>
         </div>
         {!hasNoProjects ? (
@@ -121,7 +122,9 @@ export function OverviewPage() {
               UPCOMING RUNS
             </p>
             <div className="rounded-lg border bg-card p-2">
-              <OverviewUpcomingRunsTable runs={overviewQuery.data.upcomingRuns} />
+              <OverviewUpcomingRunsTable
+                runs={overviewQuery.data.upcomingRuns}
+              />
             </div>
           </div>
 

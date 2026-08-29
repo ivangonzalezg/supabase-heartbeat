@@ -12,13 +12,13 @@ import type { WorkflowSchedulerService } from '../workflows/scheduler/workflow-s
 import { ProjectsService } from './projects.service';
 import { ProjectNotFoundError } from './projects.errors';
 
-function buildFakeWorkflowSchedulerService(): WorkflowSchedulerService & {
+function buildFakeWorkflowSchedulerService(): {
   registerOrReplaceForProject: jest.Mock;
+  unregister: jest.Mock;
 } {
   return {
     registerOrReplaceForProject: jest.fn(() => Promise.resolve()),
-  } as unknown as WorkflowSchedulerService & {
-    registerOrReplaceForProject: jest.Mock;
+    unregister: jest.fn(),
   };
 }
 
@@ -83,7 +83,7 @@ describe('ProjectsService', () => {
     workflowSchedulerService = buildFakeWorkflowSchedulerService();
     service = new ProjectsService(
       { db } as never,
-      workflowSchedulerService,
+      workflowSchedulerService as unknown as WorkflowSchedulerService,
     );
 
     admin = await createUser(db, 'admin');
@@ -588,6 +588,26 @@ describe('ProjectsService', () => {
 
       await expect(service.findById(adminActor, created.id)).rejects.toThrow(
         ProjectNotFoundError,
+      );
+    });
+
+    it('unregisters the scheduler job for each of the project workflows', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+      const [workflow] = await db
+        .insert(schema.workflows)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: created.id,
+          name: 'Workflow',
+          cronExpression: '0 * * * *',
+          timezone: 'UTC',
+        })
+        .returning();
+
+      await service.delete(adminActor, created.id);
+
+      expect(workflowSchedulerService.unregister).toHaveBeenCalledWith(
+        workflow.id,
       );
     });
 

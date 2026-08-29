@@ -66,7 +66,10 @@ export function OverviewUpcomingRunsTable({
               >
                 <Link
                   to="/projects/$projectId/workflows/$workflowId"
-                  params={{ projectId: run.projectId, workflowId: run.workflowId }}
+                  params={{
+                    projectId: run.projectId,
+                    workflowId: run.workflowId,
+                  }}
                 >
                   View workflow
                 </Link>
