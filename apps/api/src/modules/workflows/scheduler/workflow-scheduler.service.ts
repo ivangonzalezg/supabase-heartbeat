@@ -4,31 +4,36 @@ import {
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { CronJob } from 'cron';
 import { DatabaseService } from '../../../database/database.service';
-import { workflows } from '../../../database/schema';
+import { projects, workflows } from '../../../database/schema';
 import type { Workflow } from '../../../database/schema/types';
 import { WorkflowRunsService } from '../runs/workflow-runs.service';
 import { readSchedulerConfig } from './scheduler.config';
 
 /**
- * Keeps one real, timer-backed `CronJob` per `enabled: true` workflow,
- * firing scheduled runs through `WorkflowRunsService.executeScheduled`.
- * Entirely opt-in via `SCHEDULER_ENABLED` (see `scheduler.config.ts`) —
- * when disabled, this service registers nothing and every public method
- * is a no-op, so manual execution (`executeManual`) is completely
- * unaffected either way.
+ * Keeps one real, timer-backed `CronJob` per `enabled: true` workflow
+ * whose owning project is also `enabled: true`, firing scheduled runs
+ * through `WorkflowRunsService.executeScheduled`. Entirely opt-in via
+ * `SCHEDULER_ENABLED` (see `scheduler.config.ts`) — when disabled, this
+ * service registers nothing and every public method is a no-op, so
+ * manual execution (`executeManual`) is completely unaffected either
+ * way.
  *
  * The in-memory `jobs` registry is the only source of truth for "what's
  * currently scheduled" — it is populated once at
- * `onApplicationBootstrap` from every `enabled: true` workflow row, and
- * kept in sync afterward only by `WorkflowsService` calling
- * `registerOrReplace`/`unregister` after each successful create/update/
- * replace/delete. There is no periodic re-sync: if the registry and the
- * database ever disagree (e.g. a row edited directly, bypassing the
- * API), the discrepancy persists until the next mutation through
- * `WorkflowsService` or the next process restart.
+ * `onApplicationBootstrap` from every `enabled: true` workflow row whose
+ * project is also `enabled: true`, and kept in sync afterward by
+ * `WorkflowsService` calling `registerOrReplace`/`unregister` after each
+ * successful workflow create/update/replace/delete, and by
+ * `ProjectsService` calling `registerOrReplaceForProject` after each
+ * successful project `enabled` change. There is no periodic re-sync: if
+ * the registry and the database ever disagree (e.g. a row edited
+ * directly, bypassing the API), the discrepancy persists until the next
+ * mutation through `WorkflowsService`/`ProjectsService` or the next
+ * process restart — `handleTick` re-checks both flags on every real fire
+ * as a defensive backstop against that drift (see below).
  */
 @Injectable()
 export class WorkflowSchedulerService
@@ -56,11 +61,12 @@ export class WorkflowSchedulerService
     }
 
     const enabledWorkflows = await this.db
-      .select()
+      .select({ workflow: workflows })
       .from(workflows)
-      .where(eq(workflows.enabled, true));
+      .innerJoin(projects, eq(projects.id, workflows.projectId))
+      .where(and(eq(workflows.enabled, true), eq(projects.enabled, true)));
 
-    for (const workflow of enabledWorkflows) {
+    for (const { workflow } of enabledWorkflows) {
       this.registerJob(workflow);
     }
     this.logger.log(`Scheduler enabled: registered ${this.jobs.size} job(s).`);
@@ -77,8 +83,9 @@ export class WorkflowSchedulerService
    * Called by `WorkflowsService` after create/update/replace succeeds.
    * Re-reads the row itself rather than trusting a caller-passed
    * snapshot, so it always registers exactly what's persisted. If the
-   * workflow is missing or `enabled: false`, any existing job for it is
-   * removed instead. No-op entirely when the scheduler is disabled.
+   * workflow is missing, `enabled: false`, or its owning project is
+   * missing/disabled, any existing job for it is removed instead. No-op
+   * entirely when the scheduler is disabled.
    */
   async registerOrReplace(workflowId: string): Promise<void> {
     if (!this.config.enabled) return;
@@ -93,7 +100,49 @@ export class WorkflowSchedulerService
       return;
     }
 
+    const [project] = await this.db
+      .select({ enabled: projects.enabled })
+      .from(projects)
+      .where(eq(projects.id, workflow.projectId));
+
+    if (!project || !project.enabled) {
+      this.unregister(workflowId);
+      return;
+    }
+
     this.registerJob(workflow);
+  }
+
+  /**
+   * Called by `ProjectsService` after a project's `enabled` flag changes.
+   * Re-syncs every one of the project's `enabled: true` workflows against
+   * the project's current `enabled` state in one pass: registers a job
+   * for each when the project is now enabled, or unregisters any existing
+   * jobs when it is now disabled. No-op entirely when the scheduler is
+   * disabled.
+   */
+  async registerOrReplaceForProject(projectId: string): Promise<void> {
+    if (!this.config.enabled) return;
+
+    const [project] = await this.db
+      .select({ enabled: projects.enabled })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+
+    const projectWorkflows = await this.db
+      .select()
+      .from(workflows)
+      .where(
+        and(eq(workflows.projectId, projectId), eq(workflows.enabled, true)),
+      );
+
+    for (const workflow of projectWorkflows) {
+      if (project?.enabled) {
+        this.registerJob(workflow);
+      } else {
+        this.unregister(workflow.id);
+      }
+    }
   }
 
   /**
@@ -106,6 +155,7 @@ export class WorkflowSchedulerService
     if (existing) {
       void existing.stop();
       this.jobs.delete(workflowId);
+      this.logger.log(`Unregistered CronJob for workflow ${workflowId}.`);
     }
   }
 
@@ -150,6 +200,7 @@ export class WorkflowSchedulerService
         },
       });
       this.jobs.set(workflow.id, job);
+      this.logger.log(`Registered CronJob for workflow ${workflow.id}.`);
     } catch (error) {
       // Defensive: cronExpression/timezone are already validated at
       // write time (IsCronExpression/IsIanaTimeZone), so this should be
@@ -176,6 +227,20 @@ export class WorkflowSchedulerService
       if (!workflow || !workflow.enabled) {
         // Deleted or disabled between the last registry sync and this
         // tick firing; stop it defensively rather than executing.
+        this.unregister(workflowId);
+        return;
+      }
+
+      const [project] = await this.db
+        .select({ enabled: projects.enabled })
+        .from(projects)
+        .where(eq(projects.id, workflow.projectId));
+
+      if (!project || !project.enabled) {
+        // The owning project was disabled (or deleted) since the last
+        // registry sync — scheduled execution stops, mirroring the
+        // workflow-disabled case above. Manual execution is unaffected:
+        // it goes through `executeManual`, not this tick handler.
         this.unregister(workflowId);
         return;
       }

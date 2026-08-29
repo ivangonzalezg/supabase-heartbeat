@@ -6,6 +6,7 @@ import {
 import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { CronJob } from 'cron';
 import { DatabaseService } from '../../database/database.service';
+import { WorkflowSchedulerService } from '../workflows/scheduler/workflow-scheduler.service';
 import {
   projects,
   workflows,
@@ -31,7 +32,10 @@ const RECENT_ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly workflowSchedulerService: WorkflowSchedulerService,
+  ) {}
 
   private get db() {
     return this.databaseService.db;
@@ -385,6 +389,12 @@ export class ProjectsService {
 
     if (!row) {
       throw new ProjectNotFoundError();
+    }
+
+    if (input.enabled !== undefined) {
+      await this.workflowSchedulerService.registerOrReplaceForProject(
+        row.id,
+      );
     }
 
     return toProjectResponse(row);

@@ -1359,9 +1359,10 @@ list), not arbitrary pagination or a single-run detail-by-ID lookup.
 ## Scheduler
 
 `src/modules/workflows/scheduler/` (`WorkflowSchedulerService`, a
-provider inside `WorkflowsModule`, not a separate module) keeps one
-real, timer-backed `CronJob` (from the `cron` package) per workflow with
-`enabled: true`, firing scheduled runs through
+provider inside `WorkflowsModule`, exported for `ProjectsModule` to
+consume — not a separate module) keeps one real, timer-backed `CronJob`
+(from the `cron` package) per workflow with `enabled: true` whose owning
+project is also `enabled: true`, firing scheduled runs through
 `WorkflowRunsService.executeScheduled` — the same orchestration manual
 execution uses, with `triggerType: 'scheduled'` instead of `'manual'`.
 
@@ -1371,22 +1372,51 @@ nothing at startup and every one of its public methods is a no-op —
 manual execution is completely unaffected either way.
 
 **Registration lifecycle.** At `onApplicationBootstrap`, every
-`enabled: true` workflow row gets a `CronJob` built from its
-`cronExpression`/`timezone` and started immediately. After that, the
-registry is kept in sync only by `WorkflowsService` calling
-`registerOrReplace(workflowId)` after every successful create/update/
-replace, and `unregister(workflowId)` after every successful delete —
-`registerOrReplace` always re-reads the row itself (never trusts a
-caller-passed snapshot) and registers, replaces, or removes the job
-based on the row's current `enabled` value, so toggling `enabled`
-through `PATCH`, changing `cronExpression`/`timezone`, or deleting a
-workflow all converge to the correct registered/unregistered state
-through this same entry point. There is no periodic re-sync: if the
-registry and the database ever disagree (e.g. a row edited directly,
-bypassing the API), the discrepancy persists until the next mutation
-through `WorkflowsService` or the next process restart. On
+`enabled: true` workflow row whose owning project is also `enabled:
+true` (an inner join, not a post-filter) gets a `CronJob` built from its
+`cronExpression`/`timezone` and started immediately — a workflow in a
+disabled project is never registered in the first place. After that,
+the registry is kept in sync by two callers:
+
+- `WorkflowsService` calls `registerOrReplace(workflowId)` after every
+  successful workflow create/update/replace, and `unregister(workflowId)`
+  after every successful delete. `registerOrReplace` always re-reads the
+  workflow row itself (never trusts a caller-passed snapshot), then also
+  re-reads its owning project's `enabled` flag, and registers, replaces,
+  or removes the job based on both — so toggling a workflow's `enabled`
+  through `PATCH`, changing its `cronExpression`/`timezone`, or deleting
+  it all converge to the correct state through this one entry point,
+  without ever registering a job for a workflow whose project is
+  disabled.
+- `ProjectsService` calls `registerOrReplaceForProject(projectId)` after
+  every successful project update that includes `enabled` in the request
+  body. It re-reads the project's current `enabled` value and every one
+  of its `enabled: true` workflows, then registers a job for each when
+  the project is now enabled, or unregisters any existing job for each
+  when it is now disabled — so flipping a project's `enabled` flag
+  immediately (re)schedules or stops every workflow that belongs to it,
+  rather than waiting for each workflow's own next tick or the next
+  per-workflow mutation.
+
+There is no periodic re-sync: if the registry and the database ever
+disagree (e.g. a row edited directly, bypassing the API), the
+discrepancy persists until the next mutation through
+`WorkflowsService`/`ProjectsService` or the next process restart. On
 `onApplicationShutdown`, every registered job is stopped and the
 registry is cleared.
+
+**Project-disabled guard (defensive backstop).** Every real tick,
+`handleTick` re-reads not only the workflow row (see "Error isolation"
+below) but also its owning project's `enabled` flag; if either the
+workflow or the project is disabled (or gone), the job is unregistered
+and the tick executes nothing. In the common case this is now
+redundant with the registration-time filtering above — the job simply
+wouldn't be registered — but it stays as a backstop against the
+registry/database drift the lack of periodic re-sync allows. This only
+gates the *scheduled* path — manual execution (`executeManual`) never
+checks either `enabled` flag, matching the existing precedent that
+disabled workflows can still be run manually (see "Workflow Runs"
+above).
 
 **Overlap policy.** `executeScheduled` enforces `overlapPolicy: 'skip'`
 (the only value in the closed set today, but the check is gated on

@@ -22,6 +22,6 @@ import { WorkflowSchedulerService } from './scheduler/workflow-scheduler.service
     WorkflowRunsService,
     WorkflowSchedulerService,
   ],
-  exports: [WorkflowRunsService],
+  exports: [WorkflowRunsService, WorkflowSchedulerService],
 })
 export class WorkflowsModule {}

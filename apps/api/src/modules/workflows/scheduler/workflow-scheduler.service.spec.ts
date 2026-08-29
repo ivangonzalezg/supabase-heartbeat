@@ -137,6 +137,17 @@ describe('WorkflowSchedulerService', () => {
 
       await service.onApplicationShutdown();
     });
+
+    it('does not register workflows belonging to a disabled project', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db, { enabled: false });
+      await createWorkflow(db, project.id, { enabled: true });
+
+      const service = buildService(db, workflowRunsService);
+      await service.onApplicationBootstrap();
+
+      expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
   });
 
   describe('registerOrReplace', () => {
@@ -164,6 +175,24 @@ describe('WorkflowSchedulerService', () => {
       await service.registerOrReplace(workflow.id);
 
       expect(service.getRegisteredWorkflowIds()).toEqual([workflow.id]);
+
+      await service.onApplicationShutdown();
+    });
+
+    it('logs when a job is registered', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db);
+      const workflow = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
+
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflow.id);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        `Registered CronJob for workflow ${workflow.id}.`,
+      );
 
       await service.onApplicationShutdown();
     });
@@ -199,6 +228,39 @@ describe('WorkflowSchedulerService', () => {
         .update(schema.workflows)
         .set({ enabled: false })
         .where(eq(schema.workflows.id, workflow.id));
+      await service.registerOrReplace(workflow.id);
+
+      expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
+
+    it('does not register a job when the owning project is disabled', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db, { enabled: false });
+      const workflow = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflow.id);
+
+      expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
+
+    it('unregisters an already-registered job when the project becomes disabled', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db, { enabled: true });
+      const workflow = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflow.id);
+      expect(service.getRegisteredWorkflowIds()).toEqual([workflow.id]);
+
+      await db
+        .update(schema.projects)
+        .set({ enabled: false })
+        .where(eq(schema.projects.id, project.id));
       await service.registerOrReplace(workflow.id);
 
       expect(service.getRegisteredWorkflowIds()).toEqual([]);
@@ -244,6 +306,110 @@ describe('WorkflowSchedulerService', () => {
       service.unregister(workflow.id);
 
       expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
+
+    it('logs when a registered job is removed', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db);
+      const workflow = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflow.id);
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
+
+      service.unregister(workflow.id);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        `Unregistered CronJob for workflow ${workflow.id}.`,
+      );
+    });
+
+    it('does not log when there is no job to remove', () => {
+      const service = buildService(db, workflowRunsService);
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
+
+      service.unregister('nonexistent-id');
+
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('registerOrReplaceForProject', () => {
+    it('is a no-op when the scheduler is disabled', async () => {
+      delete process.env.SCHEDULER_ENABLED;
+      const project = await createProject(db, { enabled: true });
+      await createWorkflow(db, project.id, { enabled: true });
+
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplaceForProject(project.id);
+
+      expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
+
+    it('registers every enabled workflow of a now-enabled project', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db, { enabled: true });
+      const enabledOne = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      const enabledTwo = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      await createWorkflow(db, project.id, { enabled: false });
+
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplaceForProject(project.id);
+
+      const registered = service.getRegisteredWorkflowIds();
+      expect(registered).toHaveLength(2);
+      expect(registered).toEqual(
+        expect.arrayContaining([enabledOne.id, enabledTwo.id]),
+      );
+
+      await service.onApplicationShutdown();
+    });
+
+    it('unregisters every job of a now-disabled project', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db, { enabled: true });
+      const workflowOne = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      const workflowTwo = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflowOne.id);
+      await service.registerOrReplace(workflowTwo.id);
+      expect(service.getRegisteredWorkflowIds()).toHaveLength(2);
+
+      await db
+        .update(schema.projects)
+        .set({ enabled: false })
+        .where(eq(schema.projects.id, project.id));
+      await service.registerOrReplaceForProject(project.id);
+
+      expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
+
+    it('does not affect workflows belonging to other projects', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const projectA = await createProject(db, { enabled: false });
+      const projectB = await createProject(db, { enabled: true });
+      await createWorkflow(db, projectA.id, { enabled: true });
+      const workflowB = await createWorkflow(db, projectB.id, {
+        enabled: true,
+      });
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflowB.id);
+      expect(service.getRegisteredWorkflowIds()).toEqual([workflowB.id]);
+
+      await service.registerOrReplaceForProject(projectA.id);
+
+      expect(service.getRegisteredWorkflowIds()).toEqual([workflowB.id]);
+
+      await service.onApplicationShutdown();
     });
   });
 
@@ -335,6 +501,26 @@ describe('WorkflowSchedulerService', () => {
         .update(schema.workflows)
         .set({ enabled: false })
         .where(eq(schema.workflows.id, workflow.id));
+
+      await service.handleTick(workflow.id);
+
+      expect(workflowRunsService.executeScheduled).not.toHaveBeenCalled();
+      expect(service.getRegisteredWorkflowIds()).toEqual([]);
+    });
+
+    it('unregisters and does not execute when the project is now disabled', async () => {
+      process.env.SCHEDULER_ENABLED = 'true';
+      const project = await createProject(db);
+      const workflow = await createWorkflow(db, project.id, {
+        enabled: true,
+      });
+      const service = buildService(db, workflowRunsService);
+      await service.registerOrReplace(workflow.id);
+
+      await db
+        .update(schema.projects)
+        .set({ enabled: false })
+        .where(eq(schema.projects.id, project.id));
 
       await service.handleTick(workflow.id);
 

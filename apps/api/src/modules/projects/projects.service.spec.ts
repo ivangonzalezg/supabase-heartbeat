@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { join } from 'path';
 import { ForbiddenException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
@@ -7,8 +8,19 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from '../../database/schema';
 import type { AppDatabase } from '../../database/database.types';
 import type { AuthenticatedActor } from '../../lib/authorization/authorization.types';
+import type { WorkflowSchedulerService } from '../workflows/scheduler/workflow-scheduler.service';
 import { ProjectsService } from './projects.service';
 import { ProjectNotFoundError } from './projects.errors';
+
+function buildFakeWorkflowSchedulerService(): WorkflowSchedulerService & {
+  registerOrReplaceForProject: jest.Mock;
+} {
+  return {
+    registerOrReplaceForProject: jest.fn(() => Promise.resolve()),
+  } as unknown as WorkflowSchedulerService & {
+    registerOrReplaceForProject: jest.Mock;
+  };
+}
 
 function createTestDb(): { db: AppDatabase; connection: Database.Database } {
   const connection = new Database(':memory:');
@@ -56,6 +68,9 @@ describe('ProjectsService', () => {
   let db: AppDatabase;
   let connection: Database.Database;
   let service: ProjectsService;
+  let workflowSchedulerService: ReturnType<
+    typeof buildFakeWorkflowSchedulerService
+  >;
   let admin: Awaited<ReturnType<typeof createUser>>;
   let otherAdmin: Awaited<ReturnType<typeof createUser>>;
   let viewer: Awaited<ReturnType<typeof createUser>>;
@@ -65,7 +80,11 @@ describe('ProjectsService', () => {
 
   beforeEach(async () => {
     ({ db, connection } = createTestDb());
-    service = new ProjectsService({ db } as never);
+    workflowSchedulerService = buildFakeWorkflowSchedulerService();
+    service = new ProjectsService(
+      { db } as never,
+      workflowSchedulerService,
+    );
 
     admin = await createUser(db, 'admin');
     otherAdmin = await createUser(db, 'admin');
@@ -271,6 +290,26 @@ describe('ProjectsService', () => {
         .where(eq(schema.projects.id, created.id));
 
       expect(stillOriginal?.name).toBe(validCreateInput.name);
+    });
+
+    it('re-syncs the scheduler when enabled is included in the update', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+
+      await service.update(adminActor, created.id, { enabled: false });
+
+      expect(
+        workflowSchedulerService.registerOrReplaceForProject,
+      ).toHaveBeenCalledWith(created.id);
+    });
+
+    it('does not touch the scheduler when enabled is not included in the update', async () => {
+      const created = await service.create(adminActor, validCreateInput);
+
+      await service.update(adminActor, created.id, { name: 'Renamed' });
+
+      expect(
+        workflowSchedulerService.registerOrReplaceForProject,
+      ).not.toHaveBeenCalled();
     });
   });
 
