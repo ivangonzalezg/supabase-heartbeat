@@ -4,7 +4,6 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { and, asc, desc, eq, exists } from 'drizzle-orm';
-import { CronJob } from 'cron';
 import type { JsonValue } from '@supabase-heartbeat/validation';
 import { DatabaseService } from '../../database/database.service';
 import { projects, workflows, workflowSteps } from '../../database/schema';
@@ -27,6 +26,7 @@ import type { WorkflowStepResponse } from './steps/workflow-steps.types';
 import { validateWorkflowReferences } from './references/validate-workflow-references';
 import { WorkflowRunsService } from './runs/workflow-runs.service';
 import { WorkflowSchedulerService } from './scheduler/workflow-scheduler.service';
+import { computeNextRun } from './lib/compute-next-run';
 
 @Injectable()
 export class WorkflowsService {
@@ -193,33 +193,10 @@ export class WorkflowsService {
       ...detail,
       metrics: {
         ...metrics,
-        nextRun: this.computeNextRun(detail),
+        nextRun: computeNextRun(detail),
       },
       recentRuns,
     };
-  }
-
-  private computeNextRun(
-    workflow: Pick<WorkflowResponse, 'cronExpression' | 'timezone' | 'enabled'>,
-  ): Date | null {
-    if (!workflow.enabled) {
-      return null;
-    }
-    try {
-      const job = CronJob.from({
-        cronTime: workflow.cronExpression,
-        timeZone: workflow.timezone,
-        // `onTick` is required by the type signature but never invoked —
-        // this `CronJob` is never `.start()`ed, only used for its
-        // `.nextDate()` date-math utility. No scheduler is introduced.
-        onTick: () => {},
-      });
-      return job.nextDate().toJSDate();
-    } catch {
-      // Defensive: cronExpression is already validated at write time
-      // (IsCronExpression), so this should be unreachable in practice.
-      return null;
-    }
   }
 
   async update(

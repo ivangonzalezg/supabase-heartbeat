@@ -4,9 +4,9 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
-import { CronJob } from 'cron';
 import { DatabaseService } from '../../database/database.service';
 import { WorkflowSchedulerService } from '../workflows/scheduler/workflow-scheduler.service';
+import { computeNextRun } from '../workflows/lib/compute-next-run';
 import {
   projects,
   workflows,
@@ -133,7 +133,7 @@ export class ProjectsService {
           timezone: row.timezone,
           lastRun: lastRun?.startedAt ?? null,
           lastStatus: lastRun?.status ?? null,
-          nextRun: this.computeNextRun(row),
+          nextRun: computeNextRun(row),
         };
       },
     );
@@ -163,32 +163,6 @@ export class ProjectsService {
       workflows: workflowSummaries,
       recentRuns,
     };
-  }
-
-  private computeNextRun(
-    workflow: Pick<
-      ProjectWorkflowSummary,
-      'cronExpression' | 'timezone' | 'enabled'
-    >,
-  ): Date | null {
-    if (!workflow.enabled) {
-      return null;
-    }
-    try {
-      const job = CronJob.from({
-        cronTime: workflow.cronExpression,
-        timeZone: workflow.timezone,
-        // `onTick` is required by the type signature but never invoked —
-        // this `CronJob` is never `.start()`ed, only used for its
-        // `.nextDate()` date-math utility. No scheduler is introduced.
-        onTick: () => {},
-      });
-      return job.nextDate().toJSDate();
-    } catch {
-      // Defensive: cronExpression is already validated at write time
-      // (IsCronExpression), so this should be unreachable in practice.
-      return null;
-    }
   }
 
   private async computeLastRunByWorkflow(
