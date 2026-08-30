@@ -1,268 +1,239 @@
-# Supabase Heartbeat
+<p align="center">
+  <img src="./apps/web/src/shared/images/logo-horizontal-light.svg#gh-light-mode-only" width="480" alt="Supabase Heartbeat">
+  <img src="./apps/web/src/shared/images/logo-horizontal-dark.svg#gh-dark-mode-only" width="480" alt="Supabase Heartbeat">
+</p>
 
-Supabase Heartbeat is an early-stage, self-hosted application for configuring
-and executing scheduled activity against Supabase projects.
+<p align="center">
+  Run scheduled Supabase workflows from a self-hosted control plane.
+</p>
 
-**Current status:** the project has a working NestJS API (with SQLite
-persistence, Drizzle migrations, a Better Auth authentication foundation,
-and ownership-scoped Projects and Workflows APIs). Workflows are created
-together with their complete ordered step list transactionally, and
-steps can be managed afterward through a dedicated, ownership-protected
-API. A workflow's enabled steps can be executed manually and
-synchronously via a dedicated endpoint, and a step's configuration can
-reference an earlier enabled step's output
-(`${steps.<step_key>.output.<path>}`); scheduled/cron-triggered
-execution is not implemented yet — see the
-[API README](apps/api/README.md) for the exact current scope.
+<p align="center">
+  <a href="#license"><img src="https://img.shields.io/badge/license-TBD-lightgrey" alt="License: to be determined"></a>
+  <a href="https://github.com/ivangonzalezg/supabase-heartbeat/releases"><img src="https://img.shields.io/github/v/release/ivangonzalezg/supabase-heartbeat?display_name=tag&label=latest%20version" alt="Latest release"></a>
+  <a href="#quick-start-with-docker"><img src="https://img.shields.io/badge/docker%20pulls-not%20published-lightgrey" alt="Docker pulls: image not published"></a>
+</p>
 
-## Repository structure
+Supabase Heartbeat helps teams create, run, and observe scheduled activity against their Supabase projects. Define ordered workflow steps, execute them manually when needed, and enable the built-in cron scheduler when it is time to automate.
 
-```text
-supabase-heartbeat/
-├── apps/
-│   ├── api/            # NestJS backend: HTTP API, SQLite/Drizzle persistence, auth
-│   └── web/            # React + Vite frontend
-├── packages/
-│   ├── contracts/      # Reserved for shared types/contracts — placeholder only
-│   └── validation/      # Shared, browser-compatible Zod validation (workflow steps) — see apps/api/README.md
-├── package.json
-├── yarn.lock
-├── .yarnrc.yml
-├── tsconfig.base.json
-└── README.md
+> **Early-stage project:** the application is functional, self-hosted, and actively evolving. The badges above are intentionally honest: a license, GitHub release, and published Docker image have not yet been established.
+
+## Table of contents
+
+- [What it does](#what-it-does)
+- [Screenshots](#screenshots)
+- [Quick start with Docker](#quick-start-with-docker)
+- [Configuration](#configuration)
+- [Local development](#local-development)
+- [Database and migrations](#database-and-migrations)
+- [Architecture](#architecture)
+- [API documentation](#api-documentation)
+- [Current scope](#current-scope)
+- [Contributing](#contributing)
+- [License](#license)
+
+## What it does
+
+- Connects to Supabase projects with a publishable key and project URL.
+- Keeps projects, workflows, and their ordered steps ownership-scoped.
+- Supports eight workflow step types: `signin`, `signout`, `wait`, `insert`, `read`, `update`, `delete`, and `invoke_function`.
+- Runs enabled workflows manually or on a cron schedule.
+- Persists workflow and step runs, including recent activity, status, duration, and failure information.
+- Lets a later enabled step reference an earlier step's output with `${steps.<step_key>.output.<path>}`.
+- Provides a protected React dashboard and merged OpenAPI documentation.
+
+## Screenshots
+
+### Dashboard overview
+
+See projects, active workflows, upcoming runs, and recent activity in one place.
+
+![Dashboard overview showing global project and workflow activity](./images/dashboard-overview.png)
+
+### Project workflow status
+
+Review schedules, time zones, next runs, and execution history for a single Supabase project.
+
+![Project overview with workflow scheduling and recent run activity](./images/project-overview.png)
+
+### Workflow operations
+
+Inspect a workflow's status, success rate, run metrics, and next scheduled execution at a glance.
+
+![Workflow operational summary with run controls and scheduling metrics](./images/workflow-summary.png)
+
+### Project setup
+
+Connect a Supabase project before creating workflows and scheduling activity.
+
+![New project configuration form for a Supabase connection](./images/project-setup.png)
+
+## Quick start with Docker
+
+### Prerequisites
+
+- Docker Engine with Docker Compose v2.
+- A Supabase project URL and publishable key, ready to enter after sign-in.
+
+### 1. Configure the environment
+
+Copy the example configuration and replace the placeholder authentication secret with a high-entropy value of at least 32 characters. Set the optional first-administrator values to create the account used for the first sign-in.
+
+```bash
+cp .env.example .env
 ```
 
-`packages/contracts` currently contains only a minimal `package.json` —
-no shared code has been added to it yet. `packages/validation` is an
-active workspace; see "Shared validation package" in
-[apps/api/README.md](apps/api/README.md) for what it provides.
+At minimum, set these values in `.env`:
 
-## Requirements
+```dotenv
+BETTER_AUTH_SECRET=replace-with-a-high-entropy-secret-at-least-32-characters
+FIRST_ADMIN_EMAIL=admin@example.com
+FIRST_ADMIN_PASSWORD=replace-with-a-strong-initial-password
+```
 
-* **Node.js** — the workspaces target Node 24.x (see `@types/node` in
-  [apps/api/package.json](apps/api/package.json) and
-  [apps/web/package.json](apps/web/package.json)). No `.nvmrc` or
-  `.node-version` file is committed yet, so install a current Node 24
-  release manually.
-* **Yarn** — version is pinned via the `packageManager` field in
-  [package.json](package.json) (currently `yarn@4.10.3`). Do not install a
-  different Yarn version manually; let Corepack manage it.
-* **Corepack** — ships with Node.js; used to activate the pinned Yarn
-  version.
+### 2. Start Supabase Heartbeat
 
-## Installation
+```bash
+docker compose up --build -d
+```
+
+The container's entrypoint ([`docker-entrypoint.sh`](docker-entrypoint.sh)) applies any pending Drizzle migrations to the persistent `heartbeat-data` volume before starting the API — this runs automatically on every container start, including the very first one, so there is no separate migration step to remember. It is idempotent: with nothing pending (the normal case on every restart after the first), it's a no-op.
+
+Open [http://localhost:7854](http://localhost:7854), then sign in with the administrator account you configured. The application, API, and compiled frontend are served through one port.
+
+## Configuration
+
+The root [`.env.example`](.env.example) is the Docker configuration entry point. The API also documents every variable in [apps/api/.env.example](apps/api/.env.example).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `7854` | Port exposed by the application and Docker container. |
+| `DATABASE_PATH` | `./data/supabase-heartbeat.db` | SQLite database path. In Docker, it is backed by the `heartbeat-data` volume. |
+| `BETTER_AUTH_URL` | `http://localhost:7854` | Public URL used by Better Auth for absolute links. |
+| `BETTER_AUTH_SECRET` | — | Required secret for Better Auth; use at least 32 high-entropy characters. |
+| `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | — | Optional, idempotent first-administrator bootstrap. Public sign-up is disabled. |
+| `FIRST_ADMIN_NAME` | `Admin` | Display name for the bootstrapped administrator. |
+| `SCHEDULER_ENABLED` | `false` | Set to `true` to activate the timer-backed cron scheduler. |
+
+For a public deployment behind a reverse proxy, set `BETTER_AUTH_URL` to that external HTTPS URL rather than the local default.
+
+## Local development
+
+### Requirements
+
+- Node.js 24.x
+- Corepack
+- Yarn 4.10.3, activated through Corepack
+
+Install dependencies:
 
 ```bash
 corepack enable
 yarn install
 ```
 
-Do not use `npm install`, `pnpm`, or `bun` — this repository uses a single
-Yarn 4 lockfile with the `node-modules` linker (see
-[.yarnrc.yml](.yarnrc.yml)).
-
-## Integrated development
+Start the API and web application together:
 
 ```bash
 yarn dev
 ```
 
-This starts both the API and the web app together. The normal browser entry
-point is:
+Visit [http://localhost:7854](http://localhost:7854). NestJS listens on `7854` and forwards non-API development requests to Vite on `7853`; the Vite port is an internal detail, not the normal browser entry point.
 
-```text
-http://localhost:7854
-```
-
-Development request flow:
-
-```text
-Browser → NestJS :7854
-  /api/* → NestJS
-  /*     → Vite :7853
-```
-
-Vite's dev server on port `7853` is an internal implementation detail: the
-NestJS process proxies everything else there, so the browser never needs to
-visit it directly.
-
-## Workspace development
-
-Each application can also be started on its own:
+Run one application in isolation when needed:
 
 ```bash
 yarn workspace @supabase-heartbeat/api dev
 yarn workspace @supabase-heartbeat/web dev
 ```
 
-This is useful when you only need to iterate on one side (for example,
-restarting just the API without also restarting Vite), or when debugging an
-issue isolated to a single workspace. When run this way, the API's
-development proxy and the frontend's dev server are no longer wired
-together automatically — use the integrated `yarn dev` for the normal
-`http://localhost:7854` workflow.
+## Commands
 
-## Repository commands
-
-Run from the repository root:
+Run these from the repository root:
 
 ```bash
-yarn dev        # start API + web together (see above)
-yarn build      # build web, then build the API (see "Production build")
-yarn lint       # lint every workspace
-yarn typecheck  # type-check every workspace
-yarn test       # run unit/component tests in every workspace
+yarn dev        # Start API and web together
+yarn build      # Build validation, web, then API
+yarn lint       # Lint all workspaces
+yarn typecheck  # Type-check all workspaces
+yarn test       # Run API and web tests
 ```
 
-Each of these fans out to the same-named script in every workspace that
-defines it (`apps/api`, `apps/web`; the placeholder packages define none of
-these yet, so they are silently skipped).
-
-## Testing
-
-* **Unit tests** (API and web): `yarn test` from the root, or
-  `yarn workspace <name> test` for a single workspace.
-* **API e2e tests**: `yarn workspace @supabase-heartbeat/api test:e2e` —
-  exercises the real NestJS app (health endpoint, routing) against an
-  in-memory SQLite database.
-* **API production-routing e2e tests**:
-  `yarn workspace @supabase-heartbeat/api test:e2e:prod` — builds the web
-  app and verifies NestJS serves it correctly in production mode (static
-  assets, SPA fallback, API 404 behavior).
-* **Frontend tests**: `yarn workspace @supabase-heartbeat/web test` (Vitest
-  + React Testing Library).
-* **Watch mode**: `yarn workspace @supabase-heartbeat/api test:watch` or
-  `yarn workspace @supabase-heartbeat/web test:watch`.
-
-See [apps/api/README.md](apps/api/README.md) and
-[apps/web/README.md](apps/web/README.md) for full details on what each
-suite covers.
-
-## Production build
+Useful API commands:
 
 ```bash
-yarn build
+yarn workspace @supabase-heartbeat/api db:check
+yarn workspace @supabase-heartbeat/api db:generate
+yarn workspace @supabase-heartbeat/api db:migrate
+yarn workspace @supabase-heartbeat/api test:e2e
+yarn workspace @supabase-heartbeat/api test:e2e:prod
 ```
 
-This builds, in order:
+## Database and migrations
 
-1. `apps/web/dist` — the compiled frontend.
-2. `apps/api/dist` — the compiled NestJS application.
+Supabase Heartbeat stores its own application data in SQLite through Drizzle ORM and `better-sqlite3`. It does not change the schema of connected Supabase projects.
 
-In production, NestJS serves the compiled frontend directly (static assets
-plus an SPA fallback to `index.html`) instead of proxying to Vite. See
-"Docker" below for how this same build is packaged into a single container.
+For schema changes, use the explicit Drizzle workflow:
 
-## Docker
-
-The repository root [Dockerfile](Dockerfile) builds a single image that
-serves both the API and the compiled frontend behind one port — the web app
-is never run as a dev-time process inside the container; it is built to
-static files (`apps/web/dist`) and served by NestJS, exactly as in a normal
-production build (see "Production build" above).
-
-```bash
-cp .env.example .env   # fill in BETTER_AUTH_SECRET at minimum
-docker compose up --build
+```text
+db:check → db:generate → review generated SQL → db:migrate
 ```
 
-This starts one service (`app`) listening on `http://localhost:7854` (or
-whatever `PORT` you set in `.env` — the container listens on that same
-port internally, so the host and container ports always match). All of
-the API's environment variables (see
-[apps/api/.env.example](apps/api/.env.example) and
-[apps/api/README.md#environment-variables](apps/api/README.md#environment-variables))
-are configurable through the root `.env` file / `docker-compose.yml`'s
-`environment:` block — `BETTER_AUTH_SECRET` is required; the API itself
-fails to start without it (see `apps/api/src/modules/auth/auth.config.ts`),
-not `docker-compose.yml`. The frontend has no environment variables of its
-own (see "Environment" above), so there is nothing to configure for it
-beyond the image build itself.
+This workflow is a development-time step: it produces the versioned `.sql` files under [apps/api/drizzle](apps/api/drizzle), which are committed to the repository and baked into the Docker image. Applying them (`db:migrate`) against a real deployment happens automatically — see "Quick start with Docker" above — not by hand.
 
-The SQLite database file persists in the named volume `heartbeat-data`,
-mounted at `/repo/apps/api/data` (matching `DATABASE_PATH`'s default,
-`./data/supabase-heartbeat.db`, resolved against the container's working
-directory `/repo/apps/api`).
+Database files are ignored by Git. Tests use an isolated in-memory database and never touch a real database file.
 
-**Applying database migrations**: the runtime image intentionally does not
-include `drizzle-kit` or TypeScript source (production `node_modules` and
-compiled output only, per "Repository integrity" in
-[AGENTS.md](AGENTS.md)). Run migrations against the running container's
-volume using the build stage instead, from the repository root:
+## Architecture
 
-```bash
-docker compose run --rm \
-  -e DATABASE_PATH=/repo/apps/api/data/supabase-heartbeat.db \
-  --entrypoint sh \
-  --build-target build \
-  app -c "yarn workspace @supabase-heartbeat/api db:migrate"
+```text
+supabase-heartbeat/
+├── apps/
+│   ├── api/          # NestJS API, SQLite/Drizzle, Better Auth, scheduler
+│   └── web/          # React + Vite dashboard
+├── packages/
+│   ├── contracts/    # Reserved workspace; no shared code yet
+│   └── validation/   # Browser-compatible Zod workflow validation
+├── Dockerfile        # Single-image production build
+└── docker-compose.yml
 ```
 
-Multi-stage build:
+In development, the browser talks only to NestJS on port `7854`: `/api/*` is handled by NestJS and all other requests are proxied to Vite. In production, NestJS serves the compiled React application with an SPA fallback.
 
-1. `deps` — installs every workspace's dependencies (`yarn install
-   --immutable`), including the C++ toolchain `better-sqlite3` needs to
-   compile its native addon.
-2. `build` — runs the same three build steps as the root `yarn build`
-   script: `packages/validation`, then `apps/web`, then `apps/api`.
-3. `runtime` — a fresh image with only production dependencies
-   (`yarn workspaces focus @supabase-heartbeat/api --production`) plus the
-   compiled `apps/api/dist`, `apps/web/dist`, and `apps/api/drizzle`
-   directories copied in. `apps/api` and `apps/web` are kept as sibling
-   directories inside the image because
-   `apps/api/src/frontend/frontend-build-path.ts` resolves the frontend's
-   build output relative to the API process's working directory
-   (`resolve('..', 'web', 'dist')`).
+For detailed architecture and API behavior, see:
 
-The base image is `node:24-trixie-slim`, not `node:24-bookworm-slim`:
-`better-sqlite3`'s prebuilt native addon requires `GLIBC_2.38`, which
-Debian 12 (bookworm)'s glibc does not provide; Debian 13 (trixie) does.
-
-## Environment
-
-The API reads its configuration from environment variables. See
-[apps/api/.env.example](apps/api/.env.example) for the current list and
-[apps/api/README.md](apps/api/README.md#environment-variables) for what
-each one controls.
-
-The web application does not currently require its own environment file —
-it only ever makes relative `/api/...` requests, which the API's dev proxy
-and production static hosting both handle.
-
-Public sign-up is disabled. To create the first administrator, set
-`FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` before starting the API —
-see [apps/api/README.md](apps/api/README.md#first-administrator-bootstrap)
-for details.
-
-## Database
-
-The API persists data to a local SQLite file using `better-sqlite3` and
-Drizzle ORM, with explicit, versioned migrations (Drizzle Kit). Migrations
-are **not** run automatically when the application starts — they must be
-applied explicitly. Database files (`*.db`, `*.db-shm`, `*.db-wal`, and the
-`data/` directory) are ignored by Git.
-
-See [apps/api/README.md](apps/api/README.md#database) for the full database
-workflow and commands.
+- [API documentation](apps/api/README.md)
+- [Web documentation](apps/web/README.md)
+- [Agent instructions](AGENTS.md)
 
 ## API documentation
 
-Once the API is running, interactive documentation is available at:
+Once the application is running, open:
 
-```text
-/api/docs           # Scalar reference UI — single merged document
-/api/openapi.json   # Merged OpenAPI document (NestJS + Better Auth)
-```
+- [`/api/docs`](http://localhost:7854/api/docs) — merged Scalar API reference for NestJS and Better Auth endpoints.
+- [`/api/openapi.json`](http://localhost:7854/api/openapi.json) — merged OpenAPI document.
 
-See [apps/api/README.md](apps/api/README.md#api-documentation) for how the
-Better Auth endpoints are documented alongside the NestJS ones.
+## Current scope
 
-## Documentation links
+Implemented today:
 
-* [API documentation](apps/api/README.md)
-* [Web documentation](apps/web/README.md)
-* [Agent instructions](AGENTS.md)
+- Email/password authentication with an administrator bootstrap flow.
+- Ownership-scoped Projects, Workflows, and Workflow Steps APIs.
+- Transactional workflow creation and step reordering.
+- Manual workflow execution and a real, opt-in cron scheduler.
+- Run and step-run persistence, overview data, and recent-run detail.
+- Output references to earlier enabled workflow step results.
+
+Not implemented yet:
+
+- Retries, cancellation, and timeouts for running workflows.
+- Partial string interpolation, expressions, arithmetic, or fallback values in output references.
+- A dedicated paginated run-history endpoint.
+- Project sharing or frontend administration for additional users.
+- Remote-operation rollback after a later workflow step fails.
+
+## Contributing
+
+Contributions are welcome while the project is early-stage. Please read [AGENTS.md](AGENTS.md) before changing the repository, keep the scope focused, and run the relevant lint, typecheck, test, and build commands before opening a pull request.
 
 ## License
 
-License: To be determined.
+License: to be determined.
