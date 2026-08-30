@@ -9,7 +9,7 @@ describe('createAuth', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    process.env.BETTER_AUTH_URL = 'http://localhost:3000';
+    process.env.BETTER_AUTH_URL = 'http://localhost:7854';
     process.env.BETTER_AUTH_SECRET =
       'test-only-secret-not-for-any-real-use-32c';
   });

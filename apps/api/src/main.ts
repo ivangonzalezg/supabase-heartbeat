@@ -5,7 +5,7 @@ import { AppModule } from './app.module';
 import { attachViteDevProxy } from './frontend/vite-dev-proxy';
 import { setupSwagger } from './lib/swagger/swagger.config';
 
-const port = process.env.PORT ?? 3000;
+const port = process.env.PORT ?? 7854;
 const logger = new Logger('Bootstrap');
 
 async function bootstrap() {

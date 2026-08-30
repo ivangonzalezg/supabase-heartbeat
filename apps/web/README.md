@@ -46,7 +46,7 @@ yarn dev
 Normal browser entry point:
 
 ```text
-http://localhost:3000
+http://localhost:7854
 ```
 
 To iterate on the frontend in isolation instead:
@@ -55,7 +55,7 @@ To iterate on the frontend in isolation instead:
 yarn workspace @supabase-heartbeat/web dev
 ```
 
-This starts only the Vite dev server directly (bound to `127.0.0.1:5173`).
+This starts only the Vite dev server directly (bound to `127.0.0.1:7853`).
 It is useful for isolated frontend work, but the app's API requests
 (`/api/...`) will not resolve unless the API is also running and proxying
 requests — for the normal, fully working setup, use the integrated

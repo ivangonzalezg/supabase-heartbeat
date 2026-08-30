@@ -15,7 +15,7 @@
     "test:cov": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
     "test:e2e": "NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e.json",
     "test:e2e:prod": "yarn workspace @supabase-heartbeat/web build && NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e-prod.json",
-    "auth:generate": "BETTER_AUTH_URL=http://localhost:3000 BETTER_AUTH_SECRET=cli-only-not-a-real-secret-32-characters yarn dlx @better-auth/cli@latest generate --config ./src/modules/auth/auth.cli-config.ts --output ./src/database/schema/auth.ts -y",
+    "auth:generate": "BETTER_AUTH_URL=http://localhost:7854 BETTER_AUTH_SECRET=cli-only-not-a-real-secret-32-characters yarn dlx @better-auth/cli@latest generate --config ./src/modules/auth/auth.cli-config.ts --output ./src/database/schema/auth.ts -y",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:check": "drizzle-kit check",

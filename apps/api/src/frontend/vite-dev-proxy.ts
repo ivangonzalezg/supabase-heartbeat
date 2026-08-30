@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import type { Server } from 'http';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
-const VITE_DEV_SERVER_URL = 'http://127.0.0.1:5173';
+const VITE_DEV_SERVER_URL = 'http://127.0.0.1:7853';
 
 /**
  * Forwards every non-API request (including the Vite HMR WebSocket) to the

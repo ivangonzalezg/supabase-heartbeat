@@ -61,5 +61,5 @@ COPY --from=build /repo/apps/api/drizzle apps/api/drizzle
 COPY --from=build /repo/apps/web/dist apps/web/dist
 
 WORKDIR /repo/apps/api
-EXPOSE 3000
+EXPOSE 7854
 CMD ["node", "dist/main"]

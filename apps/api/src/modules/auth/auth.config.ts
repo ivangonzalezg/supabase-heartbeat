@@ -25,7 +25,7 @@ function getBaseUrl(): string {
 
   if (!baseUrl) {
     throw new Error(
-      'BETTER_AUTH_URL must be set (e.g. http://localhost:3000). See ' +
+      'BETTER_AUTH_URL must be set (e.g. http://localhost:7854). See ' +
         'apps/api/.env.example.',
     );
   }

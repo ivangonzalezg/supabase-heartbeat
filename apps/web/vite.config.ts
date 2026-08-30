@@ -23,12 +23,12 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173,
+    port: 7853,
     strictPort: true,
-    // Requests reach Vite through the NestJS proxy on :3000, so the HMR
+    // Requests reach Vite through the NestJS proxy on :7854, so the HMR
     // client must connect back to that port rather than Vite's own.
     hmr: {
-      clientPort: 3000,
+      clientPort: 7854,
     },
   },
   test: {

@@ -71,18 +71,18 @@ This starts both the API and the web app together. The normal browser entry
 point is:
 
 ```text
-http://localhost:3000
+http://localhost:7854
 ```
 
 Development request flow:
 
 ```text
-Browser → NestJS :3000
+Browser → NestJS :7854
   /api/* → NestJS
-  /*     → Vite :5173
+  /*     → Vite :7853
 ```
 
-Vite's dev server on port `5173` is an internal implementation detail: the
+Vite's dev server on port `7853` is an internal implementation detail: the
 NestJS process proxies everything else there, so the browser never needs to
 visit it directly.
 
@@ -100,7 +100,7 @@ restarting just the API without also restarting Vite), or when debugging an
 issue isolated to a single workspace. When run this way, the API's
 development proxy and the frontend's dev server are no longer wired
 together automatically — use the integrated `yarn dev` for the normal
-`http://localhost:3000` workflow.
+`http://localhost:7854` workflow.
 
 ## Repository commands
 
@@ -166,16 +166,18 @@ cp .env.example .env   # fill in BETTER_AUTH_SECRET at minimum
 docker compose up --build
 ```
 
-This starts one service (`app`) listening on `http://localhost:3000` (or
-whatever host `PORT` you set in `.env`; the container always listens on
-`3000` internally). All of the API's environment variables (see
+This starts one service (`app`) listening on `http://localhost:7854` (or
+whatever `PORT` you set in `.env` — the container listens on that same
+port internally, so the host and container ports always match). All of
+the API's environment variables (see
 [apps/api/.env.example](apps/api/.env.example) and
 [apps/api/README.md#environment-variables](apps/api/README.md#environment-variables))
 are configurable through the root `.env` file / `docker-compose.yml`'s
-`environment:` block — `BETTER_AUTH_SECRET` is required and compose refuses
-to start without it. The frontend has no environment variables of its own
-(see "Environment" above), so there is nothing to configure for it beyond
-the image build itself.
+`environment:` block — `BETTER_AUTH_SECRET` is required; the API itself
+fails to start without it (see `apps/api/src/modules/auth/auth.config.ts`),
+not `docker-compose.yml`. The frontend has no environment variables of its
+own (see "Environment" above), so there is nothing to configure for it
+beyond the image build itself.
 
 The SQLite database file persists in the named volume `heartbeat-data`,
 mounted at `/repo/apps/api/data` (matching `DATABASE_PATH`'s default,

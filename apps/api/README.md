@@ -168,9 +168,9 @@ that is already set.
 | Variable | Required | Default | Example | Controls |
 |---|---|---|---|---|
 | `DATABASE_PATH` | No | `./data/supabase-heartbeat.db` (relative to the process's working directory, which is `apps/api` for every normal entry point) | `./data/supabase-heartbeat.db` | Path to the SQLite database file. The parent directory is created automatically if missing. |
-| `BETTER_AUTH_URL` | Yes | none — throws a startup error if unset | `http://localhost:3000` | The base URL Better Auth uses to construct absolute links (e.g. in emails, redirects). |
+| `BETTER_AUTH_URL` | Yes | none — throws a startup error if unset | `http://localhost:7854` | The base URL Better Auth uses to construct absolute links (e.g. in emails, redirects). |
 | `BETTER_AUTH_SECRET` | Yes | none — throws a startup error if unset or shorter than 32 characters | a random string of 32+ characters | Secret used by Better Auth for signing/encryption. Never commit a real value. |
-| `PORT` | No | `3000` | `3000` | Port the HTTP server listens on. |
+| `PORT` | No | `7854` | `7854` | Port the HTTP server listens on. |
 | `NODE_ENV` | No | unset (behaves as development) | `production` | When set to `production`, disables the Vite dev proxy and instead serves the compiled frontend from `apps/web/dist`. |
 | `FIRST_ADMIN_EMAIL` | No, but required together with `FIRST_ADMIN_PASSWORD` | none | `admin@example.com` | Bootstraps the first administrator at startup. See "First-administrator bootstrap" below. |
 | `FIRST_ADMIN_PASSWORD` | No, but required together with `FIRST_ADMIN_EMAIL` | none | a strong initial password | Bootstrap secret — see "First-administrator bootstrap" below for secret-management guidance. |
@@ -1746,17 +1746,19 @@ shapes — this README does not duplicate a full endpoint list.
 Development:
 
 ```text
-NestJS :3000 → Vite :5173
+NestJS :7854 → Vite :7853
 ```
 
 Every request other than `/api/*` is proxied to the Vite dev server
 (including the HMR WebSocket), so the browser only ever needs to visit
-`http://localhost:3000`.
+`http://localhost:7854`.
 
 Production:
 
 ```text
-NestJS :3000
+NestJS :PORT (default 7854 — see the root README's "Docker" section for
+             how this is exposed identically inside and outside the
+             container)
   /api/*       → API
   static files → apps/web/dist
   SPA routes   → index.html

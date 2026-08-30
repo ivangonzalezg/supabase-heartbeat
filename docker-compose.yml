@@ -4,12 +4,12 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-7854}:${PORT:-7854}"
     environment:
       DATABASE_PATH: ${DATABASE_PATH}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${PORT:-3000}}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${PORT:-7854}}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
-      PORT: 3000
+      PORT: ${PORT:-7854}
       NODE_ENV: production
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL}
       FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD}
