@@ -7,6 +7,7 @@
 
 FROM node:24-trixie-slim AS base
 WORKDIR /repo
+LABEL org.opencontainers.image.source="https://github.com/ivangonzalezg/supabase-heartbeat"
 RUN corepack enable
 
 # ---------------------------------------------------------------------------

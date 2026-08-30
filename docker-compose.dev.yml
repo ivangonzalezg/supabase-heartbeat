@@ -1,7 +1,9 @@
 services:
   app:
-    image: ghcr.io/ivangonzalezg/supabase-heartbeat:${IMAGE_TAG:-latest}
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: supabase-heartbeat:local
     ports:
       - "${PORT:-7854}:${PORT:-7854}"
     environment:
@@ -15,8 +17,8 @@ services:
       FIRST_ADMIN_NAME: ${FIRST_ADMIN_NAME}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED}
     volumes:
-      - heartbeat-data:/repo/apps/api/data
+      - heartbeat-data-dev:/repo/apps/api/data
     restart: unless-stopped
 
 volumes:
-  heartbeat-data:
+  heartbeat-data-dev:

@@ -10,12 +10,12 @@
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/license-TBD-lightgrey" alt="License: to be determined"></a>
   <a href="https://github.com/ivangonzalezg/supabase-heartbeat/releases"><img src="https://img.shields.io/github/v/release/ivangonzalezg/supabase-heartbeat?display_name=tag&label=latest%20version" alt="Latest release"></a>
-  <a href="#quick-start-with-docker"><img src="https://img.shields.io/badge/docker%20pulls-not%20published-lightgrey" alt="Docker pulls: image not published"></a>
+  <a href="https://hub.docker.com/r/ivangonzalezg/supabase-heartbeat"><img src="https://img.shields.io/docker/pulls/ivangonzalezg/supabase-heartbeat?label=Docker%20pulls" alt="Docker Hub pulls"></a>
 </p>
 
 Supabase Heartbeat helps teams create, run, and observe scheduled activity against their Supabase projects. Define ordered workflow steps, execute them manually when needed, and enable the built-in cron scheduler when it is time to automate.
 
-> **Early-stage project:** the application is functional, self-hosted, and actively evolving. The badges above are intentionally honest: a license, GitHub release, and published Docker image have not yet been established.
+> **Early-stage project:** the application is functional, self-hosted, and actively evolving. A license has not yet been established.
 
 ## Table of contents
 
@@ -74,29 +74,46 @@ Connect a Supabase project before creating workflows and scheduling activity.
 - Docker Engine with Docker Compose v2.
 - A Supabase project URL and publishable key, ready to enter after sign-in.
 
-### 1. Configure the environment
+### 1. Download the release configuration
 
-Copy the example configuration and replace the placeholder authentication secret with a high-entropy value of at least 32 characters. Set the optional first-administrator values to create the account used for the first sign-in.
+Choose a published image version, then download the matching Compose file and
+environment template. This does not clone the repository.
 
 ```bash
+RELEASE_VERSION=1.2.3
+mkdir supabase-heartbeat && cd supabase-heartbeat
+curl -fsSLO "https://raw.githubusercontent.com/ivangonzalezg/supabase-heartbeat/v${RELEASE_VERSION}/docker-compose.yml"
+curl -fsSLO "https://raw.githubusercontent.com/ivangonzalezg/supabase-heartbeat/v${RELEASE_VERSION}/.env.example"
 cp .env.example .env
 ```
 
-At minimum, set these values in `.env`:
+### 2. Configure the environment
+
+Copy the example configuration and replace the placeholder authentication secret with a high-entropy value of at least 32 characters. Set the optional first-administrator values to create the account used for the first sign-in.
+
+At minimum, set these values in `.env`. `IMAGE_TAG` is the image version from
+the release tag without its `v` prefix; use `latest` only when you want to
+follow the newest stable release automatically.
 
 ```dotenv
+IMAGE_TAG=1.2.3
 BETTER_AUTH_SECRET=replace-with-a-high-entropy-secret-at-least-32-characters
 FIRST_ADMIN_EMAIL=admin@example.com
 FIRST_ADMIN_PASSWORD=replace-with-a-strong-initial-password
 ```
 
-### 2. Start Supabase Heartbeat
+### 3. Start Supabase Heartbeat
 
 ```bash
-docker compose up --build -d
+docker compose up -d
 ```
 
-The container's entrypoint ([`docker-entrypoint.sh`](docker-entrypoint.sh)) applies any pending Drizzle migrations to the persistent `heartbeat-data` volume before starting the API — this runs automatically on every container start, including the very first one, so there is no separate migration step to remember. It is idempotent: with nothing pending (the normal case on every restart after the first), it's a no-op.
+Docker Compose pulls `ghcr.io/ivangonzalezg/supabase-heartbeat` before
+starting the service. The container's entrypoint
+([`docker-entrypoint.sh`](docker-entrypoint.sh)) applies any pending Drizzle
+migrations to the persistent `heartbeat-data` volume before starting the API.
+This is idempotent: with nothing pending (the normal case on every restart
+after the first), it is a no-op.
 
 Open [http://localhost:7854](http://localhost:7854), then sign in with the administrator account you configured. The application, API, and compiled frontend are served through one port.
 
@@ -107,6 +124,7 @@ The root [`.env.example`](.env.example) is the Docker configuration entry point.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `7854` | Port exposed by the application and Docker container. |
+| `IMAGE_TAG` | `latest` | Published GHCR image tag to run; use a version such as `1.2.3` to pin a deployment. |
 | `DATABASE_PATH` | `./data/supabase-heartbeat.db` | SQLite database path. In Docker, it is backed by the `heartbeat-data` volume. |
 | `BETTER_AUTH_URL` | `http://localhost:7854` | Public URL used by Better Auth for absolute links. |
 | `BETTER_AUTH_SECRET` | — | Required secret for Better Auth; use at least 32 high-entropy characters. |
@@ -145,6 +163,16 @@ Run one application in isolation when needed:
 yarn workspace @supabase-heartbeat/api dev
 yarn workspace @supabase-heartbeat/web dev
 ```
+
+To build and run the container from a local checkout instead of pulling a
+published image, copy `.env.example` to `.env` and run:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+The development Compose file uses its own `heartbeat-data-dev` volume, so it
+does not reuse a production deployment's SQLite data.
 
 ## Commands
 
@@ -193,7 +221,8 @@ supabase-heartbeat/
 │   ├── contracts/    # Reserved workspace; no shared code yet
 │   └── validation/   # Browser-compatible Zod workflow validation
 ├── Dockerfile        # Single-image production build
-└── docker-compose.yml
+├── docker-compose.yml     # Pull-based deployment from GHCR
+└── docker-compose.dev.yml # Local Docker build from a source checkout
 ```
 
 In development, the browser talks only to NestJS on port `7854`: `/api/*` is handled by NestJS and all other requests are proxied to Vite. In production, NestJS serves the compiled React application with an SPA fallback.

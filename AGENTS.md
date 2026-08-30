@@ -87,12 +87,12 @@ Do not create:
 * Workflow: `db:check` → `db:generate` → review the generated SQL →
   `db:migrate`.
 * `db:push` is not the normal project workflow.
-* Do not run migrations automatically when the NestJS application boots
-  (`apps/api/src/main.ts`) unless explicitly requested. This is separate
-  from the Docker image's own entrypoint
-  ([`docker-entrypoint.sh`](docker-entrypoint.sh)), which does apply
-  pending migrations before starting the server — a deliberate, idempotent
-  step for self-hosted deployments, not an exception to this rule.
+* Do not add automatic migration behavior to a new runtime without explicit
+  approval. Supabase Heartbeat has two approved, idempotent startup paths:
+  `apps/api/src/main.ts` applies pending migrations for `yarn dev`, and
+  [`docker-entrypoint.sh`](docker-entrypoint.sh) applies them before the
+  self-hosted production container starts. Both only apply committed Drizzle
+  migrations; generating migrations remains an explicit review step.
 * Keep SQLite foreign keys enabled (`PRAGMA foreign_keys = ON`).
 * Use full cascade deletion for data owned through the project/workflow
   hierarchy — no soft deletes, no orphaned rows after a parent deletion.
