@@ -1615,8 +1615,12 @@ Workflow:
 5. Run `db:migrate` to apply pending migrations to the configured database.
 
 `db:push` is intentionally not part of this workflow. Migrations are never
-run automatically when the application starts — `db:migrate` must be run
-explicitly. Always review generated SQL before migrating.
+run automatically when the NestJS application boots (`src/main.ts`) —
+`db:migrate` must be run explicitly here in development. Always review
+generated SQL before migrating. The Docker image is the one exception:
+its entrypoint (repository-root [`docker-entrypoint.sh`](../../docker-entrypoint.sh))
+runs `db:migrate` automatically, once, before starting the server on every
+container start — see the root README's "Quick start with Docker" section.
 
 The API also provides `auth:generate`, which regenerates
 `src/database/schema/auth.ts` from the Better Auth configuration using the

@@ -11,5 +11,5 @@ import { join } from 'path';
 const DEFAULT_DATABASE_PATH = join('data', 'supabase-heartbeat.db');
 
 export function getDatabasePath(): string {
-  return process.env.DATABASE_PATH ?? DEFAULT_DATABASE_PATH;
+  return process.env.DATABASE_PATH || DEFAULT_DATABASE_PATH;
 }

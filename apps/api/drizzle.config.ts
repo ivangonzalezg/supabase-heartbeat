@@ -5,6 +5,6 @@ export default defineConfig({
   schema: './src/database/schema/index.ts',
   out: './drizzle',
   dbCredentials: {
-    url: process.env.DATABASE_PATH ?? './data/supabase-heartbeat.db',
+    url: process.env.DATABASE_PATH || './data/supabase-heartbeat.db',
   },
 });

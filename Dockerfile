@@ -35,7 +35,9 @@ RUN yarn workspace @supabase-heartbeat/validation build \
   && yarn workspace @supabase-heartbeat/api build
 
 # ---------------------------------------------------------------------------
-# runtime: production node_modules only, plus the compiled output.
+# runtime: production node_modules, plus drizzle-kit (needed by the
+# entrypoint to apply pending migrations on every container start — see
+# docker-entrypoint.sh) and the compiled output.
 # apps/api and apps/web are kept as sibling directories so
 # getFrontendBuildPath()'s `resolve('..', 'web', 'dist')` still resolves
 # correctly with cwd=apps/api.
@@ -55,11 +57,21 @@ RUN yarn workspaces focus @supabase-heartbeat/api --production \
   && apt-get autoremove -y \
   && yarn cache clean
 
+# drizzle-kit is a devDependency (excluded by --production above), but the
+# entrypoint needs its CLI to apply pending migrations on container start
+# (see docker-entrypoint.sh). Installed as its own step, pinned to the same
+# version apps/api/package.json's devDependencies declares.
+RUN yarn workspace @supabase-heartbeat/api add --exact drizzle-kit@0.31.10
+
 COPY --from=build /repo/packages/validation/dist packages/validation/dist
 COPY --from=build /repo/apps/api/dist apps/api/dist
 COPY --from=build /repo/apps/api/drizzle apps/api/drizzle
+COPY apps/api/drizzle.config.ts apps/api/drizzle.config.ts
 COPY --from=build /repo/apps/web/dist apps/web/dist
+
+COPY docker-entrypoint.sh /repo/docker-entrypoint.sh
+RUN chmod +x /repo/docker-entrypoint.sh
 
 WORKDIR /repo/apps/api
 EXPOSE 7854
-CMD ["node", "dist/main"]
+ENTRYPOINT ["/repo/docker-entrypoint.sh"]

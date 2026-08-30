@@ -87,8 +87,12 @@ Do not create:
 * Workflow: `db:check` → `db:generate` → review the generated SQL →
   `db:migrate`.
 * `db:push` is not the normal project workflow.
-* Do not run migrations automatically on application startup unless
-  explicitly requested.
+* Do not run migrations automatically when the NestJS application boots
+  (`apps/api/src/main.ts`) unless explicitly requested. This is separate
+  from the Docker image's own entrypoint
+  ([`docker-entrypoint.sh`](docker-entrypoint.sh)), which does apply
+  pending migrations before starting the server — a deliberate, idempotent
+  step for self-hosted deployments, not an exception to this rule.
 * Keep SQLite foreign keys enabled (`PRAGMA foreign_keys = ON`).
 * Use full cascade deletion for data owned through the project/workflow
   hierarchy — no soft deletes, no orphaned rows after a parent deletion.
