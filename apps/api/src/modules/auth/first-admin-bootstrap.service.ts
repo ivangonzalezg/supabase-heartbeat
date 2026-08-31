@@ -144,5 +144,11 @@ export class FirstAdminBootstrapService implements OnApplicationBootstrap {
 }
 
 function isMissingTableError(error: unknown): boolean {
-  return error instanceof Error && /no such table/i.test(error.message);
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    /no such table/i.test(error.message)
+  );
 }
